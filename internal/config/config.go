@@ -30,6 +30,7 @@ type Config struct {
 	InstallationID int64    `json:"installation_id"`
 	PrivateKeyPath string   `json:"private_key_path"`
 	StatePath      string   `json:"state_path"`
+	CloneDir       string   `json:"clone_dir"`
 	PollInterval   Duration `json:"poll_interval"`
 	Label          string   `json:"label"`
 	Repos          []Repo   `json:"repos"`
@@ -54,6 +55,7 @@ type Ollama struct {
 type Review struct {
 	MaxDiffBytes int      `json:"max_diff_bytes"`
 	MaxComments  int      `json:"max_comments"`
+	MaxToolCalls int      `json:"max_tool_calls"`
 	Ignore       []string `json:"ignore"`
 }
 
@@ -111,6 +113,16 @@ func (c *Config) applyDefaults() error {
 	}
 	if c.Review.MaxComments == 0 {
 		c.Review.MaxComments = 15
+	}
+	if c.Review.MaxToolCalls == 0 {
+		c.Review.MaxToolCalls = 60
+	}
+	if strings.HasPrefix(c.CloneDir, "~/") {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return err
+		}
+		c.CloneDir = filepath.Join(home, c.CloneDir[2:])
 	}
 	if c.Review.Ignore == nil {
 		c.Review.Ignore = DefaultIgnore

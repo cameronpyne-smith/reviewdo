@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"os/exec"
 	"os/signal"
 	"strings"
 	"syscall"
@@ -159,6 +160,17 @@ func check(ctx context.Context, cfgPath string) error {
 		problems = append(problems, fmt.Errorf("model %s not found", a.cfg.Ollama.Model))
 	}
 	fmt.Printf("state:          %s\n", a.cfg.StatePath)
+	if a.cfg.CloneDir == "" {
+		fmt.Printf("clone_dir:      not set, reviews use the diff only\n")
+	} else if _, err := exec.LookPath("git"); err != nil {
+		fmt.Printf("clone_dir:      %s but git is not installed\n", a.cfg.CloneDir)
+		problems = append(problems, errors.New("git not found"))
+	} else if err := os.MkdirAll(a.cfg.CloneDir, 0o755); err != nil {
+		fmt.Printf("clone_dir:      %s not writable: %v\n", a.cfg.CloneDir, err)
+		problems = append(problems, err)
+	} else {
+		fmt.Printf("clone_dir:      %s\n", a.cfg.CloneDir)
+	}
 	return errors.Join(problems...)
 }
 

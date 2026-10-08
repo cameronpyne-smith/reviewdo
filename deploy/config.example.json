@@ -1,11 +1,12 @@
 {
-  "app_id": 5237228,
-  "installation_id": 169256497,
+  "app_id": 123456,
+  "installation_id": 12345678,
+  "clone_dir": "/var/lib/reviewdo/repos",
   "poll_interval": "60s",
   "label": "reviewdo",
   "repos": [
     {
-      "name": "remundo-xml/Remundo.Iac",
+      "name": "your-org/your-repo",
       "instructions": ""
     }
   ],
@@ -18,6 +19,7 @@
     "timeout": "20m"
   },
   "review": {
-    "max_comments": 15
+    "max_comments": 15,
+    "max_tool_calls": 60
   }
 }

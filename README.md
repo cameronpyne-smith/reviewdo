@@ -12,8 +12,14 @@ using a GitHub App installation token. For each configured repository it:
 2. Scans new issue comments for `@reviewdo-bot review`.
 3. Reviews a PR when it is newly opened (or leaves draft), when a trusted
    member comments `@reviewdo-bot review`, or when the `reviewdo` label is added.
-4. Fetches only the diff (never the repo), sends it to Ollama on localhost,
-   and posts the result as a review with inline comments.
+4. Fetches the diff, lets the model read the repository at the PR's head
+   commit through read-only tools, and posts the result as a review with
+   inline comments.
+
+With `clone_dir` set, each configured repository is cloned there on first
+use and the PR head is fetched before every review. The model reads files
+with `git show <sha>:<path>`, so nothing is ever checked out and the working
+tree can be used normally. Without `clone_dir`, reviews use the diff alone.
 
 Re-reviews after a previous review only cover the commits added since then,
 unless history was rewritten or the base branch was merged in, in which case
@@ -24,8 +30,15 @@ automatically. Use a comment or the label to review them.
 
 ## Security posture
 
-- Outbound HTTPS to `api.github.com` and HTTP to `127.0.0.1:11434` only.
-  Nothing listens.
+- Outbound HTTPS to `api.github.com` and `github.com` (git fetch) and HTTP to
+  `127.0.0.1:11434` only. Nothing listens.
+- The model's tools are `read_file`, `list_dir` and `search`, all served by
+  `git show`, `git ls-tree` and `git grep` at the PR head commit. Nothing from
+  the repository is ever executed: no hooks, no builds, no tests, no
+  submodules.
+- Git runs with system and global config disabled and no credential helper.
+  The installation token is passed per command through the environment and is
+  never written to the clone.
 - The app has `Pull requests: read & write` and `Contents: read` only.
 - The private key is passed to the service by systemd `LoadCredential`, readable
   by root only on disk. It is never in this repo or in dotfiles.
@@ -53,6 +66,7 @@ reviewdo -config config.json check                       # verify key, access, m
 reviewdo -config config.json pulls owner/repo            # list open PRs
 reviewdo -config config.json review owner/repo#12        # dry run, prints the review
 reviewdo -config config.json review -post owner/repo#12  # post it
+reviewdo -config config.json review -model m -think false owner/repo#12
 reviewdo -config config.json run                         # poll loop (default)
 ```
 
@@ -65,6 +79,7 @@ See `deploy/config.example.json`. Fields:
 | `app_id`, `installation_id` | | from the GitHub App settings |
 | `private_key_path` | `$CREDENTIALS_DIRECTORY/private-key` | set explicitly when not under systemd |
 | `state_path` | `$STATE_DIRECTORY/state.json` | set explicitly when not under systemd |
+| `clone_dir` | unset | where repositories are cloned; unset means diff-only reviews |
 | `poll_interval` | `60s` | |
 | `label` | `reviewdo` | label that triggers a review; removed afterwards |
 | `repos[].name` | | `owner/repo`, must be visible to the installation |
@@ -74,4 +89,5 @@ See `deploy/config.example.json`. Fields:
 | `ollama.think` | unset | `true`/`false` for models that support thinking |
 | `review.max_diff_bytes` | `3 × num_ctx` | diff budget; remaining files are listed by name |
 | `review.max_comments` | `15` | inline comments per review, highest severity first |
+| `review.max_tool_calls` | `60` | file reads, listings and searches the model may make per review |
 | `review.ignore` | lockfiles, vendor, minified, generated | glob on basename or path, `dir/` for prefixes |

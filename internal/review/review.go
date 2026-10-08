@@ -75,6 +75,7 @@ type Input struct {
 	Pull         *github.Pull
 	Instructions string
 	Scope        Scope
+	Layout       string
 	Files        []*diff.File
 	Ignore       []string
 	MaxBytes     int
@@ -106,6 +107,10 @@ func BuildPrompt(in Input) Prompt {
 		b.WriteString("\n")
 	}
 	fmt.Fprintf(&b, "\nReview scope: %s\n", in.Scope)
+	if in.Layout != "" {
+		b.WriteString("\nRepository layout at the head commit (root and the directories touched by this change):\n")
+		b.WriteString(in.Layout)
+	}
 
 	var body strings.Builder
 	for _, f := range in.Files {

@@ -32,14 +32,38 @@ func New(url, model string, numCtx int, temperature float64, think *bool, timeou
 
 func (c *Client) Model() string { return c.model }
 
-type message struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+type Message struct {
+	Role      string     `json:"role"`
+	Content   string     `json:"content"`
+	Thinking  string     `json:"thinking,omitempty"`
+	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`
+	ToolName   string     `json:"tool_name,omitempty"`
+	ToolCallID string     `json:"tool_call_id,omitempty"`
+}
+
+type ToolCall struct {
+	ID       string `json:"id,omitempty"`
+	Function struct {
+		Name      string          `json:"name"`
+		Arguments json.RawMessage `json:"arguments"`
+	} `json:"function"`
+}
+
+type Tool struct {
+	Type     string       `json:"type"`
+	Function ToolFunction `json:"function"`
+}
+
+type ToolFunction struct {
+	Name        string          `json:"name"`
+	Description string          `json:"description"`
+	Parameters  json.RawMessage `json:"parameters"`
 }
 
 type chatRequest struct {
 	Model     string          `json:"model"`
-	Messages  []message       `json:"messages"`
+	Messages  []Message       `json:"messages"`
+	Tools     []Tool          `json:"tools,omitempty"`
 	Stream    bool            `json:"stream"`
 	Format    json.RawMessage `json:"format,omitempty"`
 	Think     *bool           `json:"think,omitempty"`
@@ -48,14 +72,12 @@ type chatRequest struct {
 }
 
 type chatResponse struct {
-	Message struct {
-		Content string `json:"content"`
-	} `json:"message"`
-	Done            bool   `json:"done"`
-	Error           string `json:"error"`
-	PromptEvalCount int    `json:"prompt_eval_count"`
-	EvalCount       int    `json:"eval_count"`
-	TotalDuration   int64  `json:"total_duration"`
+	Message         Message `json:"message"`
+	Done            bool    `json:"done"`
+	Error           string  `json:"error"`
+	PromptEvalCount int     `json:"prompt_eval_count"`
+	EvalCount       int     `json:"eval_count"`
+	TotalDuration   int64   `json:"total_duration"`
 }
 
 type Usage struct {
@@ -64,14 +86,18 @@ type Usage struct {
 	Duration     time.Duration
 }
 
-func (c *Client) Chat(ctx context.Context, system, user string, schema json.RawMessage) (string, Usage, error) {
+func (u *Usage) Add(o Usage) {
+	u.PromptTokens = max(u.PromptTokens, o.PromptTokens)
+	u.OutputTokens += o.OutputTokens
+	u.Duration += o.Duration
+}
+
+func (c *Client) Chat(ctx context.Context, messages []Message, tools []Tool, format json.RawMessage) (Message, Usage, error) {
 	req := chatRequest{
-		Model: c.model,
-		Messages: []message{
-			{Role: "system", Content: system},
-			{Role: "user", Content: user},
-		},
-		Format:    schema,
+		Model:     c.model,
+		Messages:  messages,
+		Tools:     tools,
+		Format:    format,
 		Think:     c.think,
 		KeepAlive: "15m",
 		Options: map[string]any{
@@ -81,38 +107,38 @@ func (c *Client) Chat(ctx context.Context, system, user string, schema json.RawM
 	}
 	body, err := json.Marshal(req)
 	if err != nil {
-		return "", Usage{}, err
+		return Message{}, Usage{}, err
 	}
 	hr, err := http.NewRequestWithContext(ctx, http.MethodPost, c.url+"/api/chat", bytes.NewReader(body))
 	if err != nil {
-		return "", Usage{}, err
+		return Message{}, Usage{}, err
 	}
 	hr.Header.Set("Content-Type", "application/json")
 	resp, err := c.http.Do(hr)
 	if err != nil {
-		return "", Usage{}, fmt.Errorf("ollama: %w", err)
+		return Message{}, Usage{}, fmt.Errorf("ollama: %w", err)
 	}
 	defer resp.Body.Close()
 	data, err := io.ReadAll(io.LimitReader(resp.Body, 50<<20))
 	if err != nil {
-		return "", Usage{}, err
+		return Message{}, Usage{}, err
 	}
 	var out chatResponse
 	if err := json.Unmarshal(data, &out); err != nil {
-		return "", Usage{}, fmt.Errorf("ollama: %d %s", resp.StatusCode, truncate(string(data), 300))
+		return Message{}, Usage{}, fmt.Errorf("ollama: %d %s", resp.StatusCode, truncate(string(data), 300))
 	}
 	if out.Error != "" {
-		return "", Usage{}, fmt.Errorf("ollama: %s", out.Error)
+		return Message{}, Usage{}, fmt.Errorf("ollama: %s", out.Error)
 	}
 	if resp.StatusCode >= 300 {
-		return "", Usage{}, fmt.Errorf("ollama: status %d", resp.StatusCode)
+		return Message{}, Usage{}, fmt.Errorf("ollama: status %d", resp.StatusCode)
 	}
 	u := Usage{
 		PromptTokens: out.PromptEvalCount,
 		OutputTokens: out.EvalCount,
 		Duration:     time.Duration(out.TotalDuration),
 	}
-	return out.Message.Content, u, nil
+	return out.Message, u, nil
 }
 
 func (c *Client) Models(ctx context.Context) ([]string, error) {

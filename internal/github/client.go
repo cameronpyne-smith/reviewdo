@@ -86,6 +86,10 @@ func (c *Client) installationToken(ctx context.Context) (string, error) {
 	return c.token, nil
 }
 
+func (c *Client) Token(ctx context.Context) (string, error) {
+	return c.installationToken(ctx)
+}
+
 func (c *Client) request(ctx context.Context, method, path, auth, accept string, body any, out any) error {
 	var rdr io.Reader
 	if body != nil {

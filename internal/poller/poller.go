@@ -14,6 +14,7 @@ import (
 	"github.com/cameronpyne-smith/reviewdo/internal/config"
 	"github.com/cameronpyne-smith/reviewdo/internal/diff"
 	"github.com/cameronpyne-smith/reviewdo/internal/github"
+	"github.com/cameronpyne-smith/reviewdo/internal/gitrepo"
 	"github.com/cameronpyne-smith/reviewdo/internal/ollama"
 	"github.com/cameronpyne-smith/reviewdo/internal/review"
 	"github.com/cameronpyne-smith/reviewdo/internal/state"
@@ -23,6 +24,7 @@ type Poller struct {
 	cfg      *config.Config
 	gh       *github.Client
 	llm      *ollama.Client
+	store    *gitrepo.Store
 	st       *state.State
 	fresh    bool
 	botSlug  string
@@ -35,10 +37,15 @@ type Poller struct {
 var trustedAssociations = map[string]bool{"OWNER": true, "MEMBER": true, "COLLABORATOR": true}
 
 func New(cfg *config.Config, gh *github.Client, llm *ollama.Client, st *state.State, fresh bool, botSlug string, log *slog.Logger) *Poller {
+	var store *gitrepo.Store
+	if cfg.CloneDir != "" {
+		store = &gitrepo.Store{Dir: cfg.CloneDir, Token: gh.Token}
+	}
 	return &Poller{
 		cfg:      cfg,
 		gh:       gh,
 		llm:      llm,
+		store:    store,
 		st:       st,
 		fresh:    fresh,
 		botSlug:  botSlug,
@@ -197,8 +204,8 @@ func (p *Poller) commentTriggers(ctx context.Context, repo string, rs *state.Rep
 	return out, nil
 }
 
-func (p *Poller) Review(ctx context.Context, repo config.Repo, pull *github.Pull, previousSHA string) error {
-	fullDiff, err := p.gh.PullDiff(ctx, repo.Name, pull.Number)
+func (p *Poller) Review(ctx context.Context, repoCfg config.Repo, pull *github.Pull, previousSHA string) error {
+	fullDiff, err := p.gh.PullDiff(ctx, repoCfg.Name, pull.Number)
 	if err != nil {
 		return fmt.Errorf("fetch diff: %w", err)
 	}
@@ -206,17 +213,33 @@ func (p *Poller) Review(ctx context.Context, repo config.Repo, pull *github.Pull
 	promptFiles := files
 	scope := review.Scope{ToSHA: pull.Head.SHA}
 	if previousSHA != "" && previousSHA != pull.Head.SHA {
-		if inc := p.incrementalDiff(ctx, repo.Name, previousSHA, pull.Head.SHA); inc != nil {
+		if inc := p.incrementalDiff(ctx, repoCfg.Name, previousSHA, pull.Head.SHA); inc != nil {
 			promptFiles = inc
 			scope = review.Scope{Incremental: true, FromSHA: previousSHA, ToSHA: pull.Head.SHA}
 		}
 	}
 
+	var repo *gitrepo.Repo
+	var layout string
+	if p.store != nil {
+		repo, err = p.store.Ensure(ctx, repoCfg.Name, pull.Number, pull.Head.SHA)
+		if err != nil {
+			p.log.Warn("repository unavailable, reviewing from the diff alone", "pr", pull.Number, "err", err)
+		} else {
+			var paths []string
+			for _, f := range promptFiles {
+				paths = append(paths, f.Path)
+			}
+			layout = review.Layout(ctx, repo, paths)
+		}
+	}
+
 	prompt := review.BuildPrompt(review.Input{
-		Repo:         repo.Name,
+		Repo:         repoCfg.Name,
 		Pull:         pull,
-		Instructions: repo.Instructions,
+		Instructions: repoCfg.Instructions,
 		Scope:        scope,
+		Layout:       layout,
 		Files:        promptFiles,
 		Ignore:       p.cfg.Review.Ignore,
 		MaxBytes:     p.cfg.Review.MaxDiffBytes,
@@ -227,7 +250,7 @@ func (p *Poller) Review(ctx context.Context, repo config.Repo, pull *github.Pull
 		if p.DryRun {
 			return nil
 		}
-		_, err := p.gh.CreateReview(ctx, repo.Name, pull.Number, github.ReviewRequest{
+		_, err := p.gh.CreateReview(ctx, repoCfg.Name, pull.Number, github.ReviewRequest{
 			CommitID: pull.Head.SHA,
 			Event:    "COMMENT",
 			Body:     fmt.Sprintf("## 🟢 Ready to merge ✅\n\nNo reviewable changes %s. All changed files are ignored or binary.", scope),
@@ -235,20 +258,21 @@ func (p *Poller) Review(ctx context.Context, repo config.Repo, pull *github.Pull
 		return err
 	}
 
-	raw, usage, err := p.llm.Chat(ctx, review.SystemPrompt, prompt.Text, review.Schema)
+	var res *review.Result
+	var st review.Stats
+	if repo != nil {
+		res, st, err = review.RunAgent(ctx, p.llm, repo, review.SystemPrompt, prompt.Text, p.cfg.Review.MaxToolCalls, p.log.With("pr", pull.Number))
+	} else {
+		res, st, err = review.RunSingle(ctx, p.llm, review.SystemPrompt, prompt.Text)
+	}
 	if err != nil {
 		return err
 	}
-	p.log.Info("model responded", "pr", pull.Number, "model", p.llm.Model(), "prompt_tokens", usage.PromptTokens, "output_tokens", usage.OutputTokens, "took", usage.Duration.Round(time.Second))
-	res, err := review.ParseResult(raw)
-	if err != nil {
-		p.log.Debug("raw model output", "output", raw)
-		return err
-	}
+	p.log.Info("model responded", "pr", pull.Number, "model", p.llm.Model(), "rounds", st.Rounds, "tool_calls", st.ToolCalls, "context_tokens", st.PromptTokens, "output_tokens", st.OutputTokens, "took", st.Duration.Round(time.Second))
 	out := review.Render(res, files, scope, p.cfg.Review.MaxComments, p.botSlug, p.cfg.Label)
 
 	if p.DryRun {
-		fmt.Printf("=== %s#%d (%s) ===\n\n%s\n", repo.Name, pull.Number, scope, out.Body)
+		fmt.Printf("=== %s#%d (%s) ===\n\n%s\n", repoCfg.Name, pull.Number, scope, out.Body)
 		for _, c := range out.Comments {
 			fmt.Printf("--- %s:%d\n%s\n\n", c.Path, c.Line, c.Body)
 		}
@@ -256,12 +280,12 @@ func (p *Poller) Review(ctx context.Context, repo config.Repo, pull *github.Pull
 	}
 
 	req := github.ReviewRequest{CommitID: pull.Head.SHA, Body: out.Body, Event: "COMMENT", Comments: out.Comments}
-	rv, err := p.gh.CreateReview(ctx, repo.Name, pull.Number, req)
+	rv, err := p.gh.CreateReview(ctx, repoCfg.Name, pull.Number, req)
 	if github.IsStatus(err, http.StatusUnprocessableEntity) && len(out.Comments) > 0 {
 		p.log.Warn("inline comments rejected, posting them in the review body", "pr", pull.Number, "err", err)
 		req.Comments = nil
 		req.Body = review.FoldComments(out)
-		rv, err = p.gh.CreateReview(ctx, repo.Name, pull.Number, req)
+		rv, err = p.gh.CreateReview(ctx, repoCfg.Name, pull.Number, req)
 	}
 	if err != nil {
 		return fmt.Errorf("post review: %w", err)
