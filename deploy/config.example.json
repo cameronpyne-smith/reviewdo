@@ -12,7 +12,7 @@
   "ollama": {
     "url": "http://127.0.0.1:11434",
     "model": "qwen3.6:35b",
-    "num_ctx": 32768,
+    "num_ctx": 131072,
     "temperature": 0.2,
     "think": true,
     "timeout": "20m"
