@@ -289,13 +289,18 @@ func Render(res *Result, files []*diff.File, scope Scope, maxComments int, botSl
 	if len(out.Dropped) > 0 {
 		fmt.Fprintf(&b, "\n%d lower-severity comments were not posted to keep this review short.\n", len(out.Dropped))
 	}
-	if len(res.Files) > 0 {
-		b.WriteString("\n<details>\n<summary><strong>What changed</strong></summary>\n\n| File | Change |\n| --- | --- |\n")
-		for _, f := range res.Files {
-			desc := strings.ReplaceAll(strings.TrimSpace(f.Description), "|", "\\|")
-			fmt.Fprintf(&b, "| `%s` | %s |\n", strings.TrimSpace(f.Path), desc)
+	var rows []string
+	for _, f := range res.Files {
+		p, d := strings.TrimSpace(f.Path), strings.TrimSpace(f.Description)
+		if p == "" || d == "" {
+			continue
 		}
-		b.WriteString("\n</details>\n")
+		rows = append(rows, fmt.Sprintf("| `%s` | %s |", p, strings.ReplaceAll(d, "|", "\\|")))
+	}
+	if len(rows) > 0 {
+		b.WriteString("\n<details>\n<summary><strong>What changed</strong></summary>\n\n| File | Change |\n| --- | --- |\n")
+		b.WriteString(strings.Join(rows, "\n"))
+		b.WriteString("\n\n</details>\n")
 	}
 	fmt.Fprintf(&b, "\n<sub>Reviewed %s. Re-run with `@%s review` or the `%s` label.</sub>\n", scope, botSlug, label)
 	out.Body = b.String()
