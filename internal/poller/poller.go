@@ -300,6 +300,7 @@ func (p *Poller) Review(ctx context.Context, repoCfg config.Repo, pull *github.P
 	}
 	res := review.Merge(parts)
 	var rejected []review.Comment
+	adjusted := false
 
 	if repo != nil && p.cfg.Review.Verify != nil && *p.cfg.Review.Verify {
 		fileDiffs := map[string]string{}
@@ -326,6 +327,7 @@ func (p *Poller) Review(ctx context.Context, repoCfg config.Repo, pull *github.P
 				continue
 			}
 			if v.Verdict == "downgraded" || v.Severity != c.Severity {
+				adjusted = true
 				c.Severity = v.Severity
 				if strings.TrimSpace(v.Body) != "" {
 					c.Body = v.Body
@@ -336,7 +338,7 @@ func (p *Poller) Review(ctx context.Context, repoCfg config.Repo, pull *github.P
 		res.Comments = kept
 	}
 
-	if len(parts) > 1 {
+	if len(parts) > 1 || len(rejected) > 0 || adjusted {
 		raw, st, err := review.RunSingle(ctx, p.llm, review.SynthesisPrompt, review.SynthesisInput(header, parts, res.Comments, rejected), review.SynthesisSchema)
 		total.Merge(st)
 		if err != nil {
