@@ -14,6 +14,7 @@
     "model": "qwen3.6:35b",
     "num_ctx": 32768,
     "temperature": 0.2,
+    "think": true,
     "timeout": "20m"
   },
   "review": {
