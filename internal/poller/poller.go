@@ -205,6 +205,8 @@ func (p *Poller) commentTriggers(ctx context.Context, repo string, rs *state.Rep
 }
 
 func (p *Poller) Review(ctx context.Context, repoCfg config.Repo, pull *github.Pull, previousSHA string) error {
+	ctx, cancel := context.WithTimeout(ctx, p.cfg.Review.Timeout.Duration)
+	defer cancel()
 	fullDiff, err := p.gh.PullDiff(ctx, repoCfg.Name, pull.Number)
 	if err != nil {
 		return fmt.Errorf("fetch diff: %w", err)

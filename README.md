@@ -100,5 +100,6 @@ See `deploy/config.example.json`. Fields:
 | `ollama.think` | unset | `true`/`false` for models that support thinking |
 | `review.max_diff_bytes` | `3 × num_ctx` | diff budget; remaining files are listed by name |
 | `review.max_comments` | `15` | inline comments per review, highest severity first |
+| `review.timeout` | `30m` | deadline for one whole review, including queueing behind other requests |
 | `review.max_tool_calls` | `60` | file reads, listings and searches the model may make per review |
 | `review.ignore` | lockfiles, vendor, minified, generated | glob on basename or path, `dir/` for prefixes |

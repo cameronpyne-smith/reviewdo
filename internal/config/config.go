@@ -59,6 +59,7 @@ type Review struct {
 	MaxDiffBytes int      `json:"max_diff_bytes"`
 	MaxComments  int      `json:"max_comments"`
 	MaxToolCalls int      `json:"max_tool_calls"`
+	Timeout      Duration `json:"timeout"`
 	Ignore       []string `json:"ignore"`
 }
 
@@ -119,6 +120,9 @@ func (c *Config) applyDefaults() error {
 	}
 	if c.Review.MaxToolCalls == 0 {
 		c.Review.MaxToolCalls = 60
+	}
+	if c.Review.Timeout.Duration == 0 {
+		c.Review.Timeout.Duration = 30 * time.Minute
 	}
 	if strings.HasPrefix(c.CloneDir, "~/") {
 		home, err := os.UserHomeDir()
