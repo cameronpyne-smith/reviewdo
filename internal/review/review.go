@@ -20,7 +20,7 @@ Also check consistency, which is where most real findings in configuration and d
 - A note or value that names an environment must name the environment the file belongs to.
 - A change to one environment or component should be consistent with its siblings unless the difference is deliberate and explained.
 
-Your knowledge of external tools, providers, APIs, metric names, arguments and options may be out of date. Never state that something "does not exist", "is not valid" or "is not supported" from memory. If the repository already uses the same construct elsewhere, it is valid. If you cannot verify a claim like that from the repository, raise it at most as a minor "please verify" note.
+Your knowledge of languages, external tools, providers, APIs, metric names, arguments and options may be out of date. Never state that something is a syntax error, "does not exist", "is not valid" or "is not supported" from memory. Before raising such a claim, search the base branch for the same construct; the base branch is merged and running, so if it uses the construct, the construct is valid and there is no finding. If the base branch does not use it and you cannot prove the claim from the repository, raise it at most as a minor "please verify" note.
 
 Severity: critical means it will certainly break, lose data or open a security hole, and you have confirmed it against the files; major means a likely bug or a clear mismatch between what the change says and what it does; minor means worth fixing but not blocking; nit means optional. When unsure between two severities, choose the lower.
 

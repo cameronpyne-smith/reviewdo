@@ -15,6 +15,7 @@ type Repo interface {
 	ReadFile(ctx context.Context, path string) (string, error)
 	ListDir(ctx context.Context, path string) (string, error)
 	Search(ctx context.Context, pattern, path string) (string, error)
+	SearchBase(ctx context.Context, pattern, path string) (string, error)
 }
 
 const ToolPrompt = `
@@ -23,12 +24,13 @@ You have read-only access to the full repository at the pull request's head comm
 - read_file(path): the contents of one file
 - list_dir(path): entries in a directory ("" for the root)
 - search(pattern, path): extended-regex grep across the repository, optionally limited to a path
+- search_base(pattern, path): the same grep on the base branch, which is already merged and running; a construct found there is known to work
 
 A review based on the diff alone is incomplete. Before submitting, open the files this change depends on: the base or parent configuration a change builds on, files the diff references by name, callers of a changed function, and the equivalent file in a sibling environment when one exists. Use what you find to confirm or drop each concern; do not raise a concern that a quick read could have settled, and do not read more than you need. When you have finished, call submit_review exactly once with your final review. Never write the review as plain text.`
 
-const VerifyPrompt = `You are checking one finding from an automated code review before it is posted. You have read-only access to the repository at the pull request's head commit through read_file, list_dir and search.
+const VerifyPrompt = `You are checking one finding from an automated code review before it is posted. You have read-only access to the repository at the pull request's head commit through read_file, list_dir and search, and to the base branch through search_base. The base branch is merged and running, so anything found there is known to work.
 
-Re-read the lines the finding points at and whatever else is needed to decide whether it is true. Be sceptical. A finding is rejected if it misreads the code, describes something that is already handled, is speculative, or rests on a claim that an argument, field, metric, API or option "does not exist" or "is not valid" when the repository itself does not prove that; the reviewer's knowledge of external tools may be out of date, and a construct the repository already uses elsewhere is valid. A finding is downgraded if the problem is real but less severe than stated or needs rewording to be accurate. A finding is confirmed only if you have checked it against the files and it holds as written.
+Re-read the lines the finding points at and whatever else is needed to decide whether it is true. Be sceptical. A finding is rejected if it misreads the code, describes something that is already handled, or is speculative. If the finding claims a syntax error, an invalid or unsupported argument, option, field, metric or API, or that something does not exist, you must call search_base for the same construct before deciding: the reviewer's knowledge of languages and external tools may be out of date, and if the base branch uses the construct, the finding is wrong and must be rejected. If the base branch does not use it and you cannot prove the claim from the repository, downgrade it to a minor "please verify" note rather than confirming it. A finding is downgraded if the problem is real but less severe than stated or needs rewording to be accurate. A finding is confirmed only if you have checked it against the files and it holds as written.
 
 Call submit_verdict exactly once with: verdict (confirmed, downgraded or rejected), severity (critical, major, minor or nit; the severity it should be posted at), body (the finding text to post, corrected if needed), and reason (one sentence for the log).`
 
@@ -39,10 +41,12 @@ var reviewTools = []ollama.Tool{
 		`{"type":"object","properties":{"path":{"type":"string","description":"directory path relative to the repository root, empty for the root"}}}`),
 	fn("search", "Search file contents across the repository with an extended regular expression.",
 		`{"type":"object","properties":{"pattern":{"type":"string"},"path":{"type":"string","description":"optional directory or file to limit the search to"}},"required":["pattern"]}`),
+	fn("search_base", "Search file contents on the base branch, which is already merged and running, with an extended regular expression. Use it to check whether a construct is already in working use.",
+		`{"type":"object","properties":{"pattern":{"type":"string"},"path":{"type":"string","description":"optional directory or file to limit the search to"}},"required":["pattern"]}`),
 	fn("submit_review", "Submit the final review. Call exactly once when done.", string(Schema)),
 }
 
-var verifyTools = append(append([]ollama.Tool{}, reviewTools[:3]...),
+var verifyTools = append(append([]ollama.Tool{}, reviewTools[:4]...),
 	fn("submit_verdict", "Submit the verdict on the finding. Call exactly once when done.", `{
   "type": "object",
   "properties": {
@@ -185,6 +189,8 @@ func runTool(ctx context.Context, repo Repo, name string, args map[string]any) s
 		out, err = repo.ListDir(ctx, str("path"))
 	case "search":
 		out, err = repo.Search(ctx, str("pattern"), str("path"))
+	case "search_base":
+		out, err = repo.SearchBase(ctx, str("pattern"), str("path"))
 	default:
 		err = errors.New("unknown tool " + name)
 	}

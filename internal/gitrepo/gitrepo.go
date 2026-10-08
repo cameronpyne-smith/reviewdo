@@ -198,6 +198,14 @@ func (r *Repo) ListDirAt(ctx context.Context, ref, p string) (string, error) {
 }
 
 func (r *Repo) Search(ctx context.Context, pattern, p string) (string, error) {
+	return r.SearchAt(ctx, r.head, pattern, p)
+}
+
+func (r *Repo) SearchBase(ctx context.Context, pattern, p string) (string, error) {
+	return r.SearchAt(ctx, r.base, pattern, p)
+}
+
+func (r *Repo) SearchAt(ctx context.Context, ref, pattern, p string) (string, error) {
 	cp, err := cleanPath(p)
 	if err != nil {
 		return "", err
@@ -205,7 +213,7 @@ func (r *Repo) Search(ctx context.Context, pattern, p string) (string, error) {
 	if strings.TrimSpace(pattern) == "" {
 		return "", errors.New("pattern is required")
 	}
-	args := []string{"grep", "-n", "-I", "-E", "--max-count=50", "-e", pattern, r.head}
+	args := []string{"grep", "-n", "-I", "-E", "--max-count=50", "-e", pattern, ref}
 	if cp != "" {
 		args = append(args, "--", cp)
 	}
@@ -216,7 +224,7 @@ func (r *Repo) Search(ctx context.Context, pattern, p string) (string, error) {
 		}
 		return "", err
 	}
-	prefix := r.head + ":"
+	prefix := ref + ":"
 	var b strings.Builder
 	n := 0
 	for _, l := range strings.Split(strings.TrimRight(string(out), "\n"), "\n") {
