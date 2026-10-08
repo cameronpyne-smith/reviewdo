@@ -152,14 +152,23 @@ func runLoop(ctx context.Context, llm *ollama.Client, repo Repo, messages []olla
 }
 
 func finalise(ctx context.Context, llm *ollama.Client, messages []ollama.Message, final string, schema json.RawMessage, st *Stats) (json.RawMessage, Stats, error) {
-	messages = append(messages, ollama.Message{Role: "user", Content: fmt.Sprintf("Produce the %s arguments now as a JSON object. No tool calls, no prose.", final)})
-	msg, u, err := llm.Chat(ctx, messages, nil, schema)
-	if err != nil {
-		return nil, *st, err
+	messages = append(messages, ollama.Message{Role: "user", Content: fmt.Sprintf("Produce the %s arguments now as a JSON object. No tool calls, no prose, no further deliberation.", final)})
+	for attempt, client := range []*ollama.Client{llm, llm.WithThink(false)} {
+		msg, u, err := client.Chat(ctx, messages, nil, schema)
+		if err != nil {
+			return nil, *st, err
+		}
+		st.Usage.Add(u)
+		st.Rounds++
+		raw := extractJSON(msg.Content)
+		if json.Valid([]byte(raw)) {
+			return json.RawMessage(raw), *st, nil
+		}
+		if attempt == 0 {
+			messages = append(messages, msg, ollama.Message{Role: "user", Content: "That was not a JSON object. Output only the JSON object."})
+		}
 	}
-	st.Usage.Add(u)
-	st.Rounds++
-	return json.RawMessage(extractJSON(msg.Content)), *st, nil
+	return nil, *st, errors.New("model did not produce a JSON answer")
 }
 
 func looksLikeJSON(s string) bool {

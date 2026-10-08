@@ -34,6 +34,12 @@ func New(url, model string, numCtx, numPredict int, temperature float64, think *
 
 func (c *Client) Model() string { return c.model }
 
+func (c *Client) WithThink(think bool) *Client {
+	cp := *c
+	cp.think = &think
+	return &cp
+}
+
 type Message struct {
 	Role       string     `json:"role"`
 	Content    string     `json:"content"`

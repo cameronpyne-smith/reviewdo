@@ -296,11 +296,16 @@ func (p *Poller) Review(ctx context.Context, repoCfg config.Repo, pull *github.P
 			}
 		}
 		if err != nil {
-			return err
+			total.Merge(st)
+			log.Warn("part failed, continuing without it", "part", i+1, "of", len(groups), "err", err)
+			continue
 		}
 		total.Merge(st)
 		log.Info("part reviewed", "part", i+1, "of", len(groups), "verdict", res.Verdict, "findings", len(res.Comments), "rounds", st.Rounds, "tool_calls", st.ToolCalls, "took", st.Duration.Round(time.Second))
 		parts = append(parts, res)
+	}
+	if len(parts) == 0 {
+		return errors.New("every part of the review failed")
 	}
 	res := review.Merge(parts)
 	var rejected []review.Comment
