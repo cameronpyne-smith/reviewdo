@@ -108,7 +108,8 @@ See `deploy/config.example.json`. Fields:
 | `review.max_comments` | `15` | inline comments per review, highest severity first |
 | `review.part_bytes` | `40000` | diff bytes per review part; larger PRs are split into parts |
 | `review.verify` | `true` | verify Critical and Major findings with a second pass before posting |
-| `review.timeout` | `60m` | deadline for one whole review, including queueing behind other requests |
+| `review.time_budget` | `5m` | target duration for one review; parts and verification are cut short to fit |
+| `review.timeout` | `3 × time_budget` | hard deadline, after which the review is abandoned |
 | `review.max_output_tokens` | `48000` | total output tokens per review before the final answer is forced |
 | `review.max_tool_calls` | `60` | file reads, listings and searches the model may make per review |
 | `review.ignore` | lockfiles, vendor, minified, generated | glob on basename or path, `dir/` for prefixes |

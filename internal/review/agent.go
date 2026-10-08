@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/cameronpyne-smith/reviewdo/internal/ollama"
 )
@@ -77,6 +78,7 @@ func (s *Stats) Merge(o Stats) {
 type Limits struct {
 	MaxToolCalls int
 	MaxOutput    int
+	Deadline     time.Time
 }
 
 func runLoop(ctx context.Context, llm *ollama.Client, repo Repo, messages []ollama.Message, tools []ollama.Tool, final string, finalSchema json.RawMessage, validate func(json.RawMessage) error, lim Limits, log *slog.Logger) (json.RawMessage, Stats, error) {
@@ -93,6 +95,10 @@ func runLoop(ctx context.Context, llm *ollama.Client, repo Repo, messages []olla
 
 		if st.OutputTokens > lim.MaxOutput {
 			log.Warn("output budget exhausted, forcing the final answer", "output_tokens", st.OutputTokens)
+			return finalise(ctx, llm, messages, final, finalSchema, &st)
+		}
+		if !lim.Deadline.IsZero() && time.Now().After(lim.Deadline) && len(msg.ToolCalls) > 0 {
+			log.Info("time budget exhausted, forcing the final answer", "rounds", st.Rounds, "tool_calls", st.ToolCalls)
 			return finalise(ctx, llm, messages, final, finalSchema, &st)
 		}
 		mustRead := final == "submit_review" && st.ToolCalls == 0 && nudges == 0

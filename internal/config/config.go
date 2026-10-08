@@ -63,6 +63,7 @@ type Review struct {
 	MaxOutput    int      `json:"max_output_tokens"`
 	PartBytes    int      `json:"part_bytes"`
 	Verify       *bool    `json:"verify"`
+	TimeBudget   Duration `json:"time_budget"`
 	Timeout      Duration `json:"timeout"`
 	Ignore       []string `json:"ignore"`
 }
@@ -138,8 +139,11 @@ func (c *Config) applyDefaults() error {
 		v := true
 		c.Review.Verify = &v
 	}
+	if c.Review.TimeBudget.Duration == 0 {
+		c.Review.TimeBudget.Duration = 5 * time.Minute
+	}
 	if c.Review.Timeout.Duration == 0 {
-		c.Review.Timeout.Duration = 60 * time.Minute
+		c.Review.Timeout.Duration = 3 * c.Review.TimeBudget.Duration
 	}
 	if strings.HasPrefix(c.CloneDir, "~/") {
 		home, err := os.UserHomeDir()
