@@ -91,8 +91,9 @@ func runLoop(ctx context.Context, llm *ollama.Client, repo Repo, messages []olla
 			log.Warn("output budget exhausted, forcing the final answer", "output_tokens", st.OutputTokens)
 			return finalise(ctx, llm, messages, final, finalSchema, &st)
 		}
+		mustRead := final == "submit_review" && st.ToolCalls == 0 && nudges == 0
 		if len(msg.ToolCalls) == 0 {
-			if looksLikeJSON(msg.Content) {
+			if looksLikeJSON(msg.Content) && !mustRead {
 				return json.RawMessage(extractJSON(msg.Content)), st, nil
 			}
 			nudges++
@@ -102,8 +103,8 @@ func runLoop(ctx context.Context, llm *ollama.Client, repo Repo, messages []olla
 			text := fmt.Sprintf("Call %s now with your final answer.", final)
 			if u.Truncated && msg.Content == "" {
 				text = fmt.Sprintf("Your reasoning was cut off. Decide now with what you have: call a tool or %s, without further deliberation.", final)
-			} else if st.ToolCalls == 0 && final == "submit_review" {
-				text = "You have not read anything from the repository. Use the tools to open the files this change depends on, then call submit_review."
+			} else if mustRead {
+				text = "You have not read anything from the repository. Use the tools to open the files this change depends on and check the consistency points, then call submit_review."
 			}
 			messages = append(messages, ollama.Message{Role: "user", Content: text})
 			continue
@@ -111,6 +112,11 @@ func runLoop(ctx context.Context, llm *ollama.Client, repo Repo, messages []olla
 		for _, call := range msg.ToolCalls {
 			name := call.Function.Name
 			if name == final {
+				if mustRead {
+					nudges++
+					messages = append(messages, ollama.Message{Role: "tool", ToolName: name, ToolCallID: call.ID, Content: "rejected: you have not read anything from the repository yet. Open the files this change depends on and check the consistency points first, then call submit_review again."})
+					continue
+				}
 				var probe map[string]any
 				if err := json.Unmarshal(call.Function.Arguments, &probe); err != nil || len(probe) == 0 {
 					messages = append(messages, ollama.Message{Role: "tool", ToolName: name, ToolCallID: call.ID, Content: "invalid arguments, provide every required field"})
