@@ -79,7 +79,7 @@ type Limits struct {
 	MaxOutput    int
 }
 
-func runLoop(ctx context.Context, llm *ollama.Client, repo Repo, messages []ollama.Message, tools []ollama.Tool, final string, finalSchema json.RawMessage, lim Limits, log *slog.Logger) (json.RawMessage, Stats, error) {
+func runLoop(ctx context.Context, llm *ollama.Client, repo Repo, messages []ollama.Message, tools []ollama.Tool, final string, finalSchema json.RawMessage, validate func(json.RawMessage) error, lim Limits, log *slog.Logger) (json.RawMessage, Stats, error) {
 	var st Stats
 	nudges := 0
 	for st.Rounds = 1; st.Rounds <= lim.MaxToolCalls+5; st.Rounds++ {
@@ -121,9 +121,10 @@ func runLoop(ctx context.Context, llm *ollama.Client, repo Repo, messages []olla
 					messages = append(messages, ollama.Message{Role: "tool", ToolName: name, ToolCallID: call.ID, Content: "rejected: you have not read anything from the repository yet. Open the files this change depends on and check the consistency points first, then call submit_review again."})
 					continue
 				}
-				var probe map[string]any
-				if err := json.Unmarshal(call.Function.Arguments, &probe); err != nil || len(probe) == 0 {
-					messages = append(messages, ollama.Message{Role: "tool", ToolName: name, ToolCallID: call.ID, Content: "invalid arguments, provide every required field"})
+				if err := validate(call.Function.Arguments); err != nil {
+					nudges++
+					log.Warn("final tool call rejected, asking for a resubmit", "err", err)
+					messages = append(messages, ollama.Message{Role: "tool", ToolName: name, ToolCallID: call.ID, Content: "invalid arguments: " + err.Error() + ". Call " + name + " again with corrected arguments."})
 					continue
 				}
 				return call.Function.Arguments, st, nil
@@ -208,7 +209,11 @@ func RunAgent(ctx context.Context, llm *ollama.Client, repo Repo, system, user s
 		{Role: "system", Content: system + ToolPrompt},
 		{Role: "user", Content: user},
 	}
-	raw, st, err := runLoop(ctx, llm, repo, messages, reviewTools, "submit_review", Schema, lim, log)
+	validate := func(raw json.RawMessage) error {
+		var r Result
+		return json.Unmarshal(raw, &r)
+	}
+	raw, st, err := runLoop(ctx, llm, repo, messages, reviewTools, "submit_review", Schema, validate, lim, log)
 	if err != nil {
 		return nil, st, err
 	}
@@ -254,7 +259,17 @@ func VerifyFinding(ctx context.Context, llm *ollama.Client, repo Repo, header st
 		{Role: "user", Content: b.String()},
 	}
 	schema := verifyTools[len(verifyTools)-1].Function.Parameters
-	raw, st, err := runLoop(ctx, llm, repo, messages, verifyTools, "submit_verdict", schema, lim, log)
+	validate := func(raw json.RawMessage) error {
+		var v Verdict
+		if err := json.Unmarshal(raw, &v); err != nil {
+			return err
+		}
+		if v.Verdict == "" {
+			return errors.New("verdict is required")
+		}
+		return nil
+	}
+	raw, st, err := runLoop(ctx, llm, repo, messages, verifyTools, "submit_verdict", schema, validate, lim, log)
 	if err != nil {
 		return Verdict{}, st, err
 	}

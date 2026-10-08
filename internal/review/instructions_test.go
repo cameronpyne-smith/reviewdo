@@ -1,6 +1,9 @@
 package review
 
-import "testing"
+import (
+	"encoding/json"
+	"testing"
+)
 
 func TestGlobMatch(t *testing.T) {
 	cases := []struct {
@@ -34,5 +37,16 @@ func TestFrontmatter(t *testing.T) {
 	applyTo, body = frontmatter("# No frontmatter\n")
 	if applyTo != "" || body != "# No frontmatter\n" {
 		t.Errorf("plain = %q %q", applyTo, body)
+	}
+}
+
+func TestResultLenientFiles(t *testing.T) {
+	var r Result
+	err := json.Unmarshal([]byte(`{"verdict":"ready","summary":"ok","files":"not an array","comments":[]}`), &r)
+	if err != nil || r.Summary != "ok" || len(r.Files) != 0 {
+		t.Errorf("lenient files: err=%v r=%+v", err, r)
+	}
+	if err := json.Unmarshal([]byte(`{"verdict":"ready","summary":"ok","comments":"nope"}`), &r); err == nil {
+		t.Errorf("bad comments should fail")
 	}
 }

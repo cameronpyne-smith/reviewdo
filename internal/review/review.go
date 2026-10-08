@@ -2,6 +2,7 @@ package review
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -200,6 +201,32 @@ type Result struct {
 	Summary  string        `json:"summary"`
 	Files    []FileSummary `json:"files"`
 	Comments []Comment     `json:"comments"`
+}
+
+func (r *Result) UnmarshalJSON(b []byte) error {
+	var raw struct {
+		Verdict  string          `json:"verdict"`
+		Summary  string          `json:"summary"`
+		Files    json.RawMessage `json:"files"`
+		Comments json.RawMessage `json:"comments"`
+	}
+	if err := json.Unmarshal(b, &raw); err != nil {
+		return err
+	}
+	r.Verdict, r.Summary = raw.Verdict, raw.Summary
+	r.Files, r.Comments = nil, nil
+	if len(raw.Files) > 0 {
+		_ = json.Unmarshal(raw.Files, &r.Files)
+	}
+	if len(raw.Comments) > 0 {
+		if err := json.Unmarshal(raw.Comments, &r.Comments); err != nil {
+			return fmt.Errorf("comments must be an array of {path, line, severity, body}: %w", err)
+		}
+	}
+	if strings.TrimSpace(r.Summary) == "" {
+		return errors.New("summary is required")
+	}
+	return nil
 }
 
 func ParseResult(raw json.RawMessage) (*Result, error) {
