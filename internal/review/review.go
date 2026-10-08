@@ -65,9 +65,9 @@ type Scope struct {
 
 func (s Scope) String() string {
 	if s.Incremental {
-		return fmt.Sprintf("only the commits since the previous review (%s..%s)", short(s.FromSHA), short(s.ToSHA))
+		return fmt.Sprintf("commits %s..%s", short(s.FromSHA), short(s.ToSHA))
 	}
-	return fmt.Sprintf("the whole pull request as of commit %s", short(s.ToSHA))
+	return fmt.Sprintf("up to commit %s", short(s.ToSHA))
 }
 
 type Input struct {
