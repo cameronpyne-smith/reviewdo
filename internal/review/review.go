@@ -180,7 +180,7 @@ var verdictRank = map[string]int{"ready": 0, "caution": 1, "blocked": 2}
 var verdictLabel = map[string]string{
 	"ready":   "🟢 Ready to merge",
 	"caution": "🟡 Merge with care",
-	"blocked": "🔴 Needs changes before merging",
+	"blocked": "🔴 Changes requested",
 }
 
 func verdict(res *Result) string {
