@@ -85,14 +85,14 @@ func (s Scope) String() string {
 }
 
 type Input struct {
-	Repo         string
-	Pull         *github.Pull
-	Instructions string
-	Scope        Scope
-	Layout       string
-	Files        []*diff.File
-	Ignore       []string
-	MaxBytes     int
+	Repo     string
+	Pull     *github.Pull
+	Guidance string
+	Scope    Scope
+	Layout   string
+	Files    []*diff.File
+	Ignore   []string
+	MaxBytes int
 }
 
 type Prompt struct {
@@ -115,10 +115,8 @@ func BuildPrompt(in Input) Prompt {
 		b.WriteString(strings.TrimSpace(in.Pull.Body))
 		b.WriteString("\n")
 	}
-	if in.Instructions != "" {
-		b.WriteString("\nRepository-specific review guidance:\n")
-		b.WriteString(strings.TrimSpace(in.Instructions))
-		b.WriteString("\n")
+	if in.Guidance != "" {
+		b.WriteString(in.Guidance)
 	}
 	fmt.Fprintf(&b, "\nReview scope: %s\n", in.Scope)
 	if in.Layout != "" {

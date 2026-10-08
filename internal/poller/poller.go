@@ -222,27 +222,38 @@ func (p *Poller) Review(ctx context.Context, repoCfg config.Repo, pull *github.P
 	var repo *gitrepo.Repo
 	var layout string
 	if p.store != nil {
-		repo, err = p.store.Ensure(ctx, repoCfg.Name, pull.Number, pull.Head.SHA)
+		repo, err = p.store.Ensure(ctx, repoCfg.Name, pull.Number, pull.Head.SHA, pull.Base.Ref)
 		if err != nil {
 			p.log.Warn("repository unavailable, reviewing from the diff alone", "pr", pull.Number, "err", err)
-		} else {
-			var paths []string
-			for _, f := range promptFiles {
-				paths = append(paths, f.Path)
-			}
-			layout = review.Layout(ctx, repo, paths)
 		}
 	}
+	var repoInstructions []review.Instruction
+	if repo != nil {
+		var paths []string
+		for _, f := range promptFiles {
+			paths = append(paths, f.Path)
+		}
+		layout = review.Layout(ctx, repo, paths)
+		var changed []string
+		for _, f := range files {
+			changed = append(changed, f.Path)
+		}
+		repoInstructions = review.RepoInstructions(ctx, repo, repo.Base(), changed)
+		for _, ins := range repoInstructions {
+			p.log.Debug("using repository instructions", "pr", pull.Number, "file", ins.Source, "bytes", len(ins.Text))
+		}
+	}
+	guidance := review.RenderInstructions(p.cfg.Instructions, repoCfg.Instructions, repoInstructions)
 
 	prompt := review.BuildPrompt(review.Input{
-		Repo:         repoCfg.Name,
-		Pull:         pull,
-		Instructions: repoCfg.Instructions,
-		Scope:        scope,
-		Layout:       layout,
-		Files:        promptFiles,
-		Ignore:       p.cfg.Review.Ignore,
-		MaxBytes:     p.cfg.Review.MaxDiffBytes,
+		Repo:     repoCfg.Name,
+		Pull:     pull,
+		Guidance: guidance,
+		Scope:    scope,
+		Layout:   layout,
+		Files:    promptFiles,
+		Ignore:   p.cfg.Review.Ignore,
+		MaxBytes: p.cfg.Review.MaxDiffBytes,
 	})
 	p.log.Debug("prompt built", "pr", pull.Number, "files", len(prompt.Shown), "ignored", len(prompt.Ignored), "omitted", len(prompt.Omitted), "bytes", len(prompt.Text))
 	if len(prompt.Shown) == 0 {

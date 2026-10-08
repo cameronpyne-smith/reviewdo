@@ -33,9 +33,10 @@ type Store struct {
 type Repo struct {
 	dir  string
 	head string
+	base string
 }
 
-func (s *Store) Ensure(ctx context.Context, fullName string, number int, head string) (*Repo, error) {
+func (s *Store) Ensure(ctx context.Context, fullName string, number int, head, base string) (*Repo, error) {
 	owner, name, ok := strings.Cut(fullName, "/")
 	if !ok {
 		return nil, fmt.Errorf("bad repo name %q", fullName)
@@ -53,15 +54,15 @@ func (s *Store) Ensure(ctx context.Context, fullName string, number int, head st
 		return nil, err
 	}
 	ref := fmt.Sprintf("refs/pull/%d/head", number)
-	if _, err := s.git(ctx, dir, cloneTimeout, true, "fetch", "--quiet", "--no-recurse-submodules", "origin", ref); err != nil {
-		return nil, fmt.Errorf("fetch %s: %w", ref, err)
+	if _, err := s.git(ctx, dir, cloneTimeout, true, "fetch", "--quiet", "--no-recurse-submodules", "origin", base, ref); err != nil {
+		return nil, fmt.Errorf("fetch %s and %s: %w", base, ref, err)
 	}
 	if _, err := s.git(ctx, dir, cmdTimeout, false, "cat-file", "-e", head+"^{commit}"); err != nil {
 		if _, err := s.git(ctx, dir, cloneTimeout, true, "fetch", "--quiet", "--no-recurse-submodules", "origin", head); err != nil {
 			return nil, fmt.Errorf("commit %s not available: %w", head, err)
 		}
 	}
-	return &Repo{dir: dir, head: head}, nil
+	return &Repo{dir: dir, head: head, base: "origin/" + base}, nil
 }
 
 func (s *Store) git(ctx context.Context, dir string, timeout time.Duration, auth bool, args ...string) ([]byte, error) {
@@ -107,6 +108,8 @@ func (s *Store) git(ctx context.Context, dir string, timeout time.Duration, auth
 
 func (r *Repo) Head() string { return r.head }
 
+func (r *Repo) Base() string { return r.base }
+
 func (r *Repo) run(ctx context.Context, args ...string) ([]byte, error) {
 	s := &Store{}
 	return s.git(ctx, r.dir, cmdTimeout, false, args...)
@@ -127,6 +130,10 @@ func cleanPath(p string) (string, error) {
 }
 
 func (r *Repo) ReadFile(ctx context.Context, p string) (string, error) {
+	return r.ReadFileAt(ctx, r.head, p)
+}
+
+func (r *Repo) ReadFileAt(ctx context.Context, ref, p string) (string, error) {
 	cp, err := cleanPath(p)
 	if err != nil {
 		return "", err
@@ -134,14 +141,14 @@ func (r *Repo) ReadFile(ctx context.Context, p string) (string, error) {
 	if cp == "" {
 		return "", errors.New("path is required")
 	}
-	typ, err := r.run(ctx, "cat-file", "-t", r.head+":"+cp)
+	typ, err := r.run(ctx, "cat-file", "-t", ref+":"+cp)
 	if err != nil {
 		return "", fmt.Errorf("%s: not found at this commit", cp)
 	}
 	if strings.TrimSpace(string(typ)) == "tree" {
 		return "", fmt.Errorf("%s is a directory, use list_dir", cp)
 	}
-	out, err := r.run(ctx, "show", r.head+":"+cp)
+	out, err := r.run(ctx, "show", ref+":"+cp)
 	if err != nil {
 		return "", err
 	}
@@ -155,11 +162,15 @@ func (r *Repo) ReadFile(ctx context.Context, p string) (string, error) {
 }
 
 func (r *Repo) ListDir(ctx context.Context, p string) (string, error) {
+	return r.ListDirAt(ctx, r.head, p)
+}
+
+func (r *Repo) ListDirAt(ctx context.Context, ref, p string) (string, error) {
 	cp, err := cleanPath(p)
 	if err != nil {
 		return "", err
 	}
-	out, err := r.run(ctx, "ls-tree", r.head+":"+cp)
+	out, err := r.run(ctx, "ls-tree", ref+":"+cp)
 	if err != nil {
 		return "", fmt.Errorf("%s: not found at this commit", cp)
 	}

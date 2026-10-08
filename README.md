@@ -70,6 +70,16 @@ reviewdo -config config.json review -model m -think false owner/repo#12
 reviewdo -config config.json run                         # poll loop (default)
 ```
 
+## Review guidance
+
+Three layers are added to every prompt, in this order: global instructions
+from the config, per-repo instructions from the config, and instruction files
+owned by the repository itself. The repository files are the same ones Copilot
+uses: `.github/copilot-instructions.md`, and every
+`.github/instructions/*.instructions.md` whose `applyTo` glob matches a file
+changed by the PR. They are read from the base branch, not the PR head, so a
+PR cannot rewrite the rules it is reviewed under.
+
 ## Config
 
 See `deploy/config.example.json`. Fields:
@@ -83,7 +93,8 @@ See `deploy/config.example.json`. Fields:
 | `poll_interval` | `60s` | |
 | `label` | `reviewdo` | label that triggers a review; removed afterwards |
 | `repos[].name` | | `owner/repo`, must be visible to the installation |
-| `repos[].instructions` | | extra guidance added to the prompt for that repo |
+| `instructions`, `instructions_file` | | global review guidance for every repo, inline or from a file |
+| `repos[].instructions`, `repos[].instructions_file` | | guidance for that repo only |
 | `ollama.model` | | required |
 | `ollama.num_ctx` | `32768` | context window requested from Ollama |
 | `ollama.think` | unset | `true`/`false` for models that support thinking |

@@ -26,21 +26,24 @@ func (d *Duration) UnmarshalJSON(b []byte) error {
 }
 
 type Config struct {
-	AppID          int64    `json:"app_id"`
-	InstallationID int64    `json:"installation_id"`
-	PrivateKeyPath string   `json:"private_key_path"`
-	StatePath      string   `json:"state_path"`
-	CloneDir       string   `json:"clone_dir"`
-	PollInterval   Duration `json:"poll_interval"`
-	Label          string   `json:"label"`
-	Repos          []Repo   `json:"repos"`
-	Ollama         Ollama   `json:"ollama"`
-	Review         Review   `json:"review"`
+	AppID            int64    `json:"app_id"`
+	InstallationID   int64    `json:"installation_id"`
+	PrivateKeyPath   string   `json:"private_key_path"`
+	StatePath        string   `json:"state_path"`
+	CloneDir         string   `json:"clone_dir"`
+	PollInterval     Duration `json:"poll_interval"`
+	Label            string   `json:"label"`
+	Instructions     string   `json:"instructions"`
+	InstructionsFile string   `json:"instructions_file"`
+	Repos            []Repo   `json:"repos"`
+	Ollama           Ollama   `json:"ollama"`
+	Review           Review   `json:"review"`
 }
 
 type Repo struct {
-	Name         string `json:"name"`
-	Instructions string `json:"instructions"`
+	Name             string `json:"name"`
+	Instructions     string `json:"instructions"`
+	InstructionsFile string `json:"instructions_file"`
 }
 
 type Ollama struct {
@@ -124,10 +127,37 @@ func (c *Config) applyDefaults() error {
 		}
 		c.CloneDir = filepath.Join(home, c.CloneDir[2:])
 	}
+	var err error
+	if c.Instructions, err = withFile(c.Instructions, c.InstructionsFile); err != nil {
+		return err
+	}
+	for i := range c.Repos {
+		if c.Repos[i].Instructions, err = withFile(c.Repos[i].Instructions, c.Repos[i].InstructionsFile); err != nil {
+			return err
+		}
+	}
 	if c.Review.Ignore == nil {
 		c.Review.Ignore = DefaultIgnore
 	}
 	return nil
+}
+
+func withFile(inline, file string) (string, error) {
+	if file == "" {
+		return inline, nil
+	}
+	if strings.HasPrefix(file, "~/") {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", err
+		}
+		file = filepath.Join(home, file[2:])
+	}
+	b, err := os.ReadFile(file)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(inline + "\n\n" + string(b)), nil
 }
 
 func (c *Config) validate() error {
