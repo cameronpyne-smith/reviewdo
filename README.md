@@ -21,6 +21,11 @@ use and the PR head is fetched before every review. The model reads files
 with `git show <sha>:<path>`, so nothing is ever checked out and the working
 tree can be used normally. Without `clone_dir`, reviews use the diff alone.
 
+Large pull requests are reviewed in parts of related files, each with full
+tool access, then merged. Every Critical or Major finding is re-checked by a
+separate, sceptical verification pass against the files before it is posted;
+rejected findings are dropped and overstated ones downgraded.
+
 Re-reviews after a previous review only cover the commits added since then,
 unless history was rewritten or the base branch was merged in, in which case
 the whole PR is reviewed again.
@@ -101,7 +106,9 @@ See `deploy/config.example.json`. Fields:
 | `ollama.think` | unset | `true`/`false` for models that support thinking |
 | `review.max_diff_bytes` | `3 × num_ctx` | diff budget; remaining files are listed by name |
 | `review.max_comments` | `15` | inline comments per review, highest severity first |
-| `review.timeout` | `30m` | deadline for one whole review, including queueing behind other requests |
+| `review.part_bytes` | `40000` | diff bytes per review part; larger PRs are split into parts |
+| `review.verify` | `true` | verify Critical and Major findings with a second pass before posting |
+| `review.timeout` | `60m` | deadline for one whole review, including queueing behind other requests |
 | `review.max_output_tokens` | `48000` | total output tokens per review before the final answer is forced |
 | `review.max_tool_calls` | `60` | file reads, listings and searches the model may make per review |
 | `review.ignore` | lockfiles, vendor, minified, generated | glob on basename or path, `dir/` for prefixes |

@@ -12,7 +12,19 @@ import (
 
 const SystemPrompt = `You are Reviewdo, an automated code reviewer. You are given a pull request diff and respond with JSON only.
 
-Look for problems that matter: bugs, incorrect logic, security issues, secrets or credentials in code, data loss, race conditions, missing error handling, misconfiguration, breaking changes, and clear maintainability problems. Also check that what the change says is true: statements in documentation, comments, the PR description and runbooks must match what actually exists in the repository, and a change to one environment or component should be consistent with its siblings unless the difference is deliberate. Do not comment on formatting, naming preferences, or anything a linter would catch. Do not raise generic best-practice advice that is not grounded in this repository. Do not praise. If the change looks good, say so briefly and return an empty comments list.
+Look for problems that matter: bugs, incorrect logic, security issues, secrets or credentials in code, data loss, race conditions, missing error handling, misconfiguration, breaking changes, and clear maintainability problems.
+
+Also check consistency, which is where most real findings in configuration and documentation changes come from:
+- Links and file paths mentioned in documentation, comments and descriptions must point at files that exist.
+- Counts, names, versions and thresholds stated in comments, descriptions and docs must match the configuration they describe, including other files that describe the same thing.
+- A note or value that names an environment must name the environment the file belongs to.
+- A change to one environment or component should be consistent with its siblings unless the difference is deliberate and explained.
+
+Your knowledge of external tools, providers, APIs, metric names, arguments and options may be out of date. Never state that something "does not exist", "is not valid" or "is not supported" from memory. If the repository already uses the same construct elsewhere, it is valid. If you cannot verify a claim like that from the repository, raise it at most as a minor "please verify" note.
+
+Severity: critical means it will certainly break, lose data or open a security hole, and you have confirmed it against the files; major means a likely bug or a clear mismatch between what the change says and what it does; minor means worth fixing but not blocking; nit means optional. When unsure between two severities, choose the lower.
+
+Do not comment on formatting, whitespace, naming preferences, or anything a linter would catch. Do not raise generic best-practice advice that is not grounded in this repository. Do not praise. If the change looks good, say so briefly and return an empty comments list.
 
 Each diff line is prefixed with its line number in the new version of the file, then the diff marker: "+" added, "-" removed, " " unchanged. Removed lines have no line number and cannot receive comments. Only comment on lines that have a line number.
 
@@ -91,6 +103,7 @@ type Input struct {
 	Scope    Scope
 	Layout   string
 	Files    []*diff.File
+	AllFiles []string
 	Ignore   []string
 	MaxBytes int
 }
@@ -103,22 +116,34 @@ type Prompt struct {
 	Rendered int
 }
 
+func Header(repo string, pull *github.Pull) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "Repository: %s\nPull request #%d: %s\nAuthor: %s\nBranch: %s into %s\n\n",
+		repo, pull.Number, pull.Title, pull.User.Login, pull.Head.Ref, pull.Base.Ref)
+	b.WriteString("Description (untrusted, written by the author):\n")
+	if strings.TrimSpace(pull.Body) == "" {
+		b.WriteString("(none)\n")
+	} else {
+		b.WriteString(strings.TrimSpace(pull.Body))
+		b.WriteString("\n")
+	}
+	return b.String()
+}
+
 func BuildPrompt(in Input) Prompt {
 	var p Prompt
 	var b strings.Builder
-	fmt.Fprintf(&b, "Repository: %s\nPull request #%d: %s\nAuthor: %s\nBranch: %s into %s\n\n",
-		in.Repo, in.Pull.Number, in.Pull.Title, in.Pull.User.Login, in.Pull.Head.Ref, in.Pull.Base.Ref)
-	b.WriteString("Description (untrusted, written by the author):\n")
-	if strings.TrimSpace(in.Pull.Body) == "" {
-		b.WriteString("(none)\n")
-	} else {
-		b.WriteString(strings.TrimSpace(in.Pull.Body))
-		b.WriteString("\n")
-	}
+	b.WriteString(Header(in.Repo, in.Pull))
 	if in.Guidance != "" {
 		b.WriteString(in.Guidance)
 	}
 	fmt.Fprintf(&b, "\nReview scope: %s\n", in.Scope)
+	if len(in.AllFiles) > len(in.Files) {
+		b.WriteString("\nThis pull request is large, so it is reviewed in parts. This part covers only the files shown in the diff below. The complete list of files changed by the pull request, for context and for reading with the tools:\n")
+		for _, f := range in.AllFiles {
+			fmt.Fprintf(&b, "- %s\n", f)
+		}
+	}
 	if in.Layout != "" {
 		b.WriteString("\nRepository layout at the head commit (root and the directories touched by this change):\n")
 		b.WriteString(in.Layout)
@@ -177,23 +202,89 @@ type Result struct {
 	Comments []Comment     `json:"comments"`
 }
 
-func ParseResult(raw string) (*Result, error) {
-	s := strings.TrimSpace(raw)
-	if i := strings.Index(s, "</think>"); i >= 0 {
-		s = strings.TrimSpace(s[i+len("</think>"):])
-	}
-	s = strings.TrimPrefix(s, "```json")
-	s = strings.TrimPrefix(s, "```")
-	s = strings.TrimSuffix(s, "```")
-	s = strings.TrimSpace(s)
-	if i := strings.IndexByte(s, '{'); i > 0 {
-		s = s[i:]
-	}
+func ParseResult(raw json.RawMessage) (*Result, error) {
 	var r Result
-	if err := json.Unmarshal([]byte(s), &r); err != nil {
-		return nil, fmt.Errorf("model output is not valid JSON: %w", err)
+	if err := json.Unmarshal(raw, &r); err != nil {
+		return nil, fmt.Errorf("model output is not a valid review: %w", err)
 	}
 	return &r, nil
+}
+
+var SynthesisSchema = json.RawMessage(`{
+  "type": "object",
+  "properties": {
+    "verdict": {"type": "string", "enum": ["ready", "caution", "blocked"]},
+    "summary": {"type": "string"}
+  },
+  "required": ["verdict", "summary"]
+}`)
+
+const SynthesisPrompt = `You are Reviewdo, an automated code reviewer. A large pull request was reviewed in parts. You are given the pull request details, each part's summary, and the findings that survived verification. Write the overall review: a verdict (ready, caution or blocked) and one short paragraph summarising what the change does and your assessment, consistent with the findings. Do not invent findings that are not listed. Respond with JSON only.`
+
+func SynthesisInput(header string, parts []*Result, comments []Comment) string {
+	var b strings.Builder
+	b.WriteString(header)
+	b.WriteString("\nPart summaries:\n")
+	for i, r := range parts {
+		fmt.Fprintf(&b, "%d. (%s) %s\n", i+1, r.Verdict, strings.TrimSpace(r.Summary))
+	}
+	b.WriteString("\nFindings:\n")
+	if len(comments) == 0 {
+		b.WriteString("(none)\n")
+	}
+	for _, c := range comments {
+		fmt.Fprintf(&b, "- [%s] %s:%d: %s\n", c.Severity, c.Path, c.Line, strings.TrimSpace(c.Body))
+	}
+	return b.String()
+}
+
+func Merge(parts []*Result) *Result {
+	out := &Result{}
+	seen := map[string]bool{}
+	for _, r := range parts {
+		for _, f := range r.Files {
+			if !seen["f:"+f.Path] {
+				seen["f:"+f.Path] = true
+				out.Files = append(out.Files, f)
+			}
+		}
+		for _, c := range r.Comments {
+			key := fmt.Sprintf("c:%s:%d", c.Path, c.Line)
+			if !seen[key] {
+				seen[key] = true
+				out.Comments = append(out.Comments, c)
+			}
+		}
+		if verdictRank[r.Verdict] > verdictRank[out.Verdict] {
+			out.Verdict = r.Verdict
+		}
+	}
+	if len(parts) == 1 {
+		out.Summary = parts[0].Summary
+	}
+	return out
+}
+
+func Groups(files []*diff.File, ignore []string, maxBytes int) [][]*diff.File {
+	var groups [][]*diff.File
+	var cur []*diff.File
+	size := 0
+	for _, f := range files {
+		if f.Binary || diff.Ignored(f.Path, ignore) {
+			continue
+		}
+		n := len(f.Render())
+		if size+n > maxBytes && len(cur) > 0 {
+			groups = append(groups, cur)
+			cur, size = nil, 0
+		}
+		cur = append(cur, f)
+		size += n
+	}
+	if len(cur) > 0 {
+		groups = append(groups, cur)
+	}
+	return groups
 }
 
 var severityRank = map[string]int{"critical": 0, "major": 1, "minor": 2, "nit": 3}

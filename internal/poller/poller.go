@@ -2,6 +2,7 @@ package poller
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -207,6 +208,7 @@ func (p *Poller) commentTriggers(ctx context.Context, repo string, rs *state.Rep
 func (p *Poller) Review(ctx context.Context, repoCfg config.Repo, pull *github.Pull, previousSHA string) error {
 	ctx, cancel := context.WithTimeout(ctx, p.cfg.Review.Timeout.Duration)
 	defer cancel()
+	log := p.log.With("pr", pull.Number)
 	fullDiff, err := p.gh.PullDiff(ctx, repoCfg.Name, pull.Number)
 	if err != nil {
 		return fmt.Errorf("fetch diff: %w", err)
@@ -222,44 +224,35 @@ func (p *Poller) Review(ctx context.Context, repoCfg config.Repo, pull *github.P
 	}
 
 	var repo *gitrepo.Repo
-	var layout string
 	if p.store != nil {
 		repo, err = p.store.Ensure(ctx, repoCfg.Name, pull.Number, pull.Head.SHA, pull.Base.Ref)
 		if err != nil {
-			p.log.Warn("repository unavailable, reviewing from the diff alone", "pr", pull.Number, "err", err)
+			log.Warn("repository unavailable, reviewing from the diff alone", "err", err)
 		}
 	}
+	var changed, promptPaths []string
+	for _, f := range files {
+		changed = append(changed, f.Path)
+	}
+	for _, f := range promptFiles {
+		promptPaths = append(promptPaths, f.Path)
+	}
 	var repoInstructions []review.Instruction
+	var layout string
 	if repo != nil {
-		var paths []string
-		for _, f := range promptFiles {
-			paths = append(paths, f.Path)
-		}
-		layout = review.Layout(ctx, repo, paths)
-		var changed []string
-		for _, f := range files {
-			changed = append(changed, f.Path)
-		}
+		layout = review.Layout(ctx, repo, promptPaths)
 		repoInstructions = review.RepoInstructions(ctx, repo, repo.Base(), changed)
 		for _, ins := range repoInstructions {
-			p.log.Debug("using repository instructions", "pr", pull.Number, "file", ins.Source, "bytes", len(ins.Text))
+			log.Debug("using repository instructions", "file", ins.Source, "bytes", len(ins.Text))
 		}
 	}
 	guidance := review.RenderInstructions(p.cfg.Instructions, repoCfg.Instructions, repoInstructions)
+	header := review.Header(repoCfg.Name, pull)
+	lim := review.Limits{MaxToolCalls: p.cfg.Review.MaxToolCalls, MaxOutput: p.cfg.Review.MaxOutput}
 
-	prompt := review.BuildPrompt(review.Input{
-		Repo:     repoCfg.Name,
-		Pull:     pull,
-		Guidance: guidance,
-		Scope:    scope,
-		Layout:   layout,
-		Files:    promptFiles,
-		Ignore:   p.cfg.Review.Ignore,
-		MaxBytes: p.cfg.Review.MaxDiffBytes,
-	})
-	p.log.Debug("prompt built", "pr", pull.Number, "files", len(prompt.Shown), "ignored", len(prompt.Ignored), "omitted", len(prompt.Omitted), "bytes", len(prompt.Text))
-	if len(prompt.Shown) == 0 {
-		p.log.Info("nothing reviewable in diff", "pr", pull.Number)
+	groups := review.Groups(promptFiles, p.cfg.Review.Ignore, p.cfg.Review.PartBytes)
+	if len(groups) == 0 {
+		log.Info("nothing reviewable in diff")
 		if p.DryRun {
 			return nil
 		}
@@ -271,19 +264,93 @@ func (p *Poller) Review(ctx context.Context, repoCfg config.Repo, pull *github.P
 		return err
 	}
 
-	var res *review.Result
-	var st review.Stats
-	if repo != nil {
-		res, st, err = review.RunAgent(ctx, p.llm, repo, review.SystemPrompt, prompt.Text, p.cfg.Review.MaxToolCalls, p.cfg.Review.MaxOutput, p.log.With("pr", pull.Number))
-	} else {
-		res, st, err = review.RunSingle(ctx, p.llm, review.SystemPrompt, prompt.Text)
+	var parts []*review.Result
+	var total review.Stats
+	start := time.Now()
+	for i, group := range groups {
+		prompt := review.BuildPrompt(review.Input{
+			Repo:     repoCfg.Name,
+			Pull:     pull,
+			Guidance: guidance,
+			Scope:    scope,
+			Layout:   layout,
+			Files:    group,
+			AllFiles: promptPaths,
+			Ignore:   p.cfg.Review.Ignore,
+			MaxBytes: p.cfg.Review.MaxDiffBytes,
+		})
+		log.Debug("prompt built", "part", i+1, "of", len(groups), "files", len(prompt.Shown), "bytes", len(prompt.Text))
+		var res *review.Result
+		var st review.Stats
+		if repo != nil {
+			res, st, err = review.RunAgent(ctx, p.llm, repo, review.SystemPrompt, prompt.Text, lim, log.With("part", i+1))
+		} else {
+			var raw json.RawMessage
+			raw, st, err = review.RunSingle(ctx, p.llm, review.SystemPrompt, prompt.Text, review.Schema)
+			if err == nil {
+				res, err = review.ParseResult(raw)
+			}
+		}
+		if err != nil {
+			return err
+		}
+		total.Merge(st)
+		log.Info("part reviewed", "part", i+1, "of", len(groups), "verdict", res.Verdict, "findings", len(res.Comments), "rounds", st.Rounds, "tool_calls", st.ToolCalls, "took", st.Duration.Round(time.Second))
+		parts = append(parts, res)
 	}
-	if err != nil {
-		return err
-	}
-	p.log.Info("model responded", "pr", pull.Number, "model", p.llm.Model(), "rounds", st.Rounds, "tool_calls", st.ToolCalls, "context_tokens", st.PromptTokens, "output_tokens", st.OutputTokens, "took", st.Duration.Round(time.Second))
-	out := review.Render(res, files, scope, p.cfg.Review.MaxComments, p.botSlug, p.cfg.Label)
+	res := review.Merge(parts)
 
+	if repo != nil && p.cfg.Review.Verify != nil && *p.cfg.Review.Verify {
+		fileDiffs := map[string]string{}
+		for _, f := range files {
+			fileDiffs[f.Path] = f.Render()
+		}
+		var kept []review.Comment
+		for _, c := range res.Comments {
+			if c.Severity != "critical" && c.Severity != "major" {
+				kept = append(kept, c)
+				continue
+			}
+			v, st, err := review.VerifyFinding(ctx, p.llm, repo, header, c, fileDiffs[c.Path], review.Limits{MaxToolCalls: 12, MaxOutput: p.cfg.Review.MaxOutput / 2}, log.With("verify", c.Path))
+			total.Merge(st)
+			if err != nil {
+				log.Warn("verification failed, keeping finding", "path", c.Path, "line", c.Line, "err", err)
+				kept = append(kept, c)
+				continue
+			}
+			log.Info("verified finding", "path", c.Path, "line", c.Line, "was", c.Severity, "verdict", v.Verdict, "now", v.Severity, "reason", v.Reason, "took", st.Duration.Round(time.Second))
+			if v.Verdict == "rejected" {
+				continue
+			}
+			if v.Verdict == "downgraded" || v.Severity != c.Severity {
+				c.Severity = v.Severity
+				if strings.TrimSpace(v.Body) != "" {
+					c.Body = v.Body
+				}
+			}
+			kept = append(kept, c)
+		}
+		res.Comments = kept
+	}
+
+	if len(parts) > 1 {
+		raw, st, err := review.RunSingle(ctx, p.llm, review.SynthesisPrompt, review.SynthesisInput(header, parts, res.Comments), review.SynthesisSchema)
+		total.Merge(st)
+		if err != nil {
+			return err
+		}
+		var syn struct {
+			Verdict string `json:"verdict"`
+			Summary string `json:"summary"`
+		}
+		if err := json.Unmarshal(raw, &syn); err != nil {
+			return fmt.Errorf("synthesis output invalid: %w", err)
+		}
+		res.Verdict, res.Summary = syn.Verdict, syn.Summary
+	}
+	log.Info("review complete", "model", p.llm.Model(), "parts", len(parts), "findings", len(res.Comments), "rounds", total.Rounds, "tool_calls", total.ToolCalls, "context_tokens", total.PromptTokens, "output_tokens", total.OutputTokens, "model_time", total.Duration.Round(time.Second), "took", time.Since(start).Round(time.Second))
+
+	out := review.Render(res, files, scope, p.cfg.Review.MaxComments, p.botSlug, p.cfg.Label)
 	if p.DryRun {
 		fmt.Printf("=== %s#%d (%s) ===\n\n%s\n", repoCfg.Name, pull.Number, scope, out.Body)
 		for _, c := range out.Comments {
@@ -295,7 +362,7 @@ func (p *Poller) Review(ctx context.Context, repoCfg config.Repo, pull *github.P
 	req := github.ReviewRequest{CommitID: pull.Head.SHA, Body: out.Body, Event: "COMMENT", Comments: out.Comments}
 	rv, err := p.gh.CreateReview(ctx, repoCfg.Name, pull.Number, req)
 	if github.IsStatus(err, http.StatusUnprocessableEntity) && len(out.Comments) > 0 {
-		p.log.Warn("inline comments rejected, posting them in the review body", "pr", pull.Number, "err", err)
+		log.Warn("inline comments rejected, posting them in the review body", "err", err)
 		req.Comments = nil
 		req.Body = review.FoldComments(out)
 		rv, err = p.gh.CreateReview(ctx, repoCfg.Name, pull.Number, req)
@@ -303,7 +370,7 @@ func (p *Poller) Review(ctx context.Context, repoCfg config.Repo, pull *github.P
 	if err != nil {
 		return fmt.Errorf("post review: %w", err)
 	}
-	p.log.Info("review url", "pr", pull.Number, "url", rv.HTMLURL, "inline", len(req.Comments))
+	log.Info("review url", "url", rv.HTMLURL, "inline", len(req.Comments))
 	return nil
 }
 

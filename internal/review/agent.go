@@ -26,7 +26,13 @@ You have read-only access to the full repository at the pull request's head comm
 
 A review based on the diff alone is incomplete. Before submitting, open the files this change depends on: the base or parent configuration a change builds on, files the diff references by name, callers of a changed function, and the equivalent file in a sibling environment when one exists. Use what you find to confirm or drop each concern; do not raise a concern that a quick read could have settled, and do not read more than you need. When you have finished, call submit_review exactly once with your final review. Never write the review as plain text.`
 
-var tools = []ollama.Tool{
+const VerifyPrompt = `You are checking one finding from an automated code review before it is posted. You have read-only access to the repository at the pull request's head commit through read_file, list_dir and search.
+
+Re-read the lines the finding points at and whatever else is needed to decide whether it is true. Be sceptical. A finding is rejected if it misreads the code, describes something that is already handled, is speculative, or rests on a claim that an argument, field, metric, API or option "does not exist" or "is not valid" when the repository itself does not prove that; the reviewer's knowledge of external tools may be out of date, and a construct the repository already uses elsewhere is valid. A finding is downgraded if the problem is real but less severe than stated or needs rewording to be accurate. A finding is confirmed only if you have checked it against the files and it holds as written.
+
+Call submit_verdict exactly once with: verdict (confirmed, downgraded or rejected), severity (critical, major, minor or nit; the severity it should be posted at), body (the finding text to post, corrected if needed), and reason (one sentence for the log).`
+
+var reviewTools = []ollama.Tool{
 	fn("read_file", "Read one file from the repository at the pull request head commit.",
 		`{"type":"object","properties":{"path":{"type":"string","description":"path relative to the repository root"}},"required":["path"]}`),
 	fn("list_dir", "List the entries of a directory in the repository. Directories end with a slash.",
@@ -35,6 +41,18 @@ var tools = []ollama.Tool{
 		`{"type":"object","properties":{"pattern":{"type":"string"},"path":{"type":"string","description":"optional directory or file to limit the search to"}},"required":["pattern"]}`),
 	fn("submit_review", "Submit the final review. Call exactly once when done.", string(Schema)),
 }
+
+var verifyTools = append(append([]ollama.Tool{}, reviewTools[:3]...),
+	fn("submit_verdict", "Submit the verdict on the finding. Call exactly once when done.", `{
+  "type": "object",
+  "properties": {
+    "verdict": {"type": "string", "enum": ["confirmed", "downgraded", "rejected"]},
+    "severity": {"type": "string", "enum": ["critical", "major", "minor", "nit"]},
+    "body": {"type": "string"},
+    "reason": {"type": "string"}
+  },
+  "required": ["verdict", "severity", "body", "reason"]
+}`))
 
 func fn(name, desc, params string) ollama.Tool {
 	return ollama.Tool{Type: "function", Function: ollama.ToolFunction{Name: name, Description: desc, Parameters: json.RawMessage(params)}}
@@ -46,14 +64,21 @@ type Stats struct {
 	Rounds    int
 }
 
-func RunAgent(ctx context.Context, llm *ollama.Client, repo Repo, system, user string, maxCalls, maxOutput int, log *slog.Logger) (*Result, Stats, error) {
+func (s *Stats) Merge(o Stats) {
+	s.Usage.Add(o.Usage)
+	s.ToolCalls += o.ToolCalls
+	s.Rounds += o.Rounds
+}
+
+type Limits struct {
+	MaxToolCalls int
+	MaxOutput    int
+}
+
+func runLoop(ctx context.Context, llm *ollama.Client, repo Repo, messages []ollama.Message, tools []ollama.Tool, final string, finalSchema json.RawMessage, lim Limits, log *slog.Logger) (json.RawMessage, Stats, error) {
 	var st Stats
-	messages := []ollama.Message{
-		{Role: "system", Content: system + ToolPrompt},
-		{Role: "user", Content: user},
-	}
 	nudges := 0
-	for st.Rounds = 1; st.Rounds <= maxCalls+5; st.Rounds++ {
+	for st.Rounds = 1; st.Rounds <= lim.MaxToolCalls+5; st.Rounds++ {
 		msg, u, err := llm.Chat(ctx, messages, tools, nil)
 		if err != nil {
 			return nil, st, err
@@ -62,74 +87,82 @@ func RunAgent(ctx context.Context, llm *ollama.Client, repo Repo, system, user s
 		messages = append(messages, msg)
 		log.Debug("round", "n", st.Rounds, "output_tokens", u.OutputTokens, "truncated", u.Truncated, "tool_calls", len(msg.ToolCalls))
 
-		if st.OutputTokens > maxOutput {
-			log.Warn("output budget exhausted, forcing the final review", "output_tokens", st.OutputTokens)
-			return finalise(ctx, llm, messages, st)
+		if st.OutputTokens > lim.MaxOutput {
+			log.Warn("output budget exhausted, forcing the final answer", "output_tokens", st.OutputTokens)
+			return finalise(ctx, llm, messages, final, finalSchema, &st)
 		}
 		if len(msg.ToolCalls) == 0 {
-			if u.Truncated && msg.Content == "" {
-				nudges++
-				if nudges > 2 {
-					return finalise(ctx, llm, messages, st)
-				}
-				messages = append(messages, ollama.Message{Role: "user", Content: "Your reasoning was cut off. Decide now with what you have: call a tool or submit_review, without further deliberation."})
-				continue
-			}
-			if st.ToolCalls == 0 && nudges == 0 {
-				nudges++
-				messages = append(messages, ollama.Message{Role: "user", Content: "You have not read anything from the repository. Use the tools to open the files this change depends on, then call submit_review."})
-				continue
-			}
-			if res, err := ParseResult(msg.Content); err == nil && res.Summary != "" {
-				return res, st, nil
+			if looksLikeJSON(msg.Content) {
+				return json.RawMessage(extractJSON(msg.Content)), st, nil
 			}
 			nudges++
 			if nudges > 2 {
-				return finalise(ctx, llm, messages, st)
+				return finalise(ctx, llm, messages, final, finalSchema, &st)
 			}
-			messages = append(messages, ollama.Message{Role: "user", Content: "Call submit_review now with your final review."})
+			text := fmt.Sprintf("Call %s now with your final answer.", final)
+			if u.Truncated && msg.Content == "" {
+				text = fmt.Sprintf("Your reasoning was cut off. Decide now with what you have: call a tool or %s, without further deliberation.", final)
+			} else if st.ToolCalls == 0 && final == "submit_review" {
+				text = "You have not read anything from the repository. Use the tools to open the files this change depends on, then call submit_review."
+			}
+			messages = append(messages, ollama.Message{Role: "user", Content: text})
 			continue
 		}
-
 		for _, call := range msg.ToolCalls {
 			name := call.Function.Name
-			var args map[string]any
-			_ = json.Unmarshal(call.Function.Arguments, &args)
-			if name == "submit_review" {
-				var res Result
-				if err := json.Unmarshal(call.Function.Arguments, &res); err != nil || res.Summary == "" {
-					messages = append(messages, ollama.Message{Role: "tool", ToolName: name, ToolCallID: call.ID, Content: "invalid arguments: provide verdict, summary and comments"})
+			if name == final {
+				var probe map[string]any
+				if err := json.Unmarshal(call.Function.Arguments, &probe); err != nil || len(probe) == 0 {
+					messages = append(messages, ollama.Message{Role: "tool", ToolName: name, ToolCallID: call.ID, Content: "invalid arguments, provide every required field"})
 					continue
 				}
-				return &res, st, nil
+				return call.Function.Arguments, st, nil
 			}
 			st.ToolCalls++
 			var content string
-			if st.ToolCalls > maxCalls {
-				content = "tool budget exhausted; call submit_review now with what you know"
+			if st.ToolCalls > lim.MaxToolCalls {
+				content = fmt.Sprintf("tool budget exhausted; call %s now with what you know", final)
 			} else {
+				var args map[string]any
+				_ = json.Unmarshal(call.Function.Arguments, &args)
 				content = runTool(ctx, repo, name, args)
+				log.Debug("tool", "name", name, "args", args, "bytes", len(content))
 			}
-			log.Debug("tool", "name", name, "args", args, "bytes", len(content))
 			messages = append(messages, ollama.Message{Role: "tool", ToolName: name, ToolCallID: call.ID, Content: content})
 		}
 	}
-	return finalise(ctx, llm, messages, st)
+	return finalise(ctx, llm, messages, final, finalSchema, &st)
 }
 
-func finalise(ctx context.Context, llm *ollama.Client, messages []ollama.Message, st Stats) (*Result, Stats, error) {
-	messages = append(messages, ollama.Message{Role: "user", Content: "Produce your final review now as a JSON object with verdict, summary and comments. No tool calls."})
-	msg, u, err := llm.Chat(ctx, messages, nil, Schema)
+func finalise(ctx context.Context, llm *ollama.Client, messages []ollama.Message, final string, schema json.RawMessage, st *Stats) (json.RawMessage, Stats, error) {
+	messages = append(messages, ollama.Message{Role: "user", Content: fmt.Sprintf("Produce the %s arguments now as a JSON object. No tool calls, no prose.", final)})
+	msg, u, err := llm.Chat(ctx, messages, nil, schema)
 	if err != nil {
-		return nil, st, err
+		return nil, *st, err
 	}
 	st.Usage.Add(u)
 	st.Rounds++
-	res, err := ParseResult(msg.Content)
-	if err != nil {
-		return nil, st, err
+	return json.RawMessage(extractJSON(msg.Content)), *st, nil
+}
+
+func looksLikeJSON(s string) bool {
+	s = strings.TrimSpace(s)
+	return strings.HasPrefix(s, "{") || strings.HasPrefix(s, "```")
+}
+
+func extractJSON(raw string) string {
+	s := strings.TrimSpace(raw)
+	if i := strings.Index(s, "</think>"); i >= 0 {
+		s = strings.TrimSpace(s[i+len("</think>"):])
 	}
-	return res, st, nil
+	s = strings.TrimPrefix(s, "```json")
+	s = strings.TrimPrefix(s, "```")
+	s = strings.TrimSuffix(s, "```")
+	s = strings.TrimSpace(s)
+	if i := strings.IndexByte(s, '{'); i > 0 {
+		s = s[i:]
+	}
+	return s
 }
 
 func runTool(ctx context.Context, repo Repo, name string, args map[string]any) string {
@@ -156,6 +189,75 @@ func runTool(ctx context.Context, repo Repo, name string, args map[string]any) s
 		return "(empty)"
 	}
 	return out
+}
+
+func RunAgent(ctx context.Context, llm *ollama.Client, repo Repo, system, user string, lim Limits, log *slog.Logger) (*Result, Stats, error) {
+	messages := []ollama.Message{
+		{Role: "system", Content: system + ToolPrompt},
+		{Role: "user", Content: user},
+	}
+	raw, st, err := runLoop(ctx, llm, repo, messages, reviewTools, "submit_review", Schema, lim, log)
+	if err != nil {
+		return nil, st, err
+	}
+	var res Result
+	if err := json.Unmarshal(raw, &res); err != nil {
+		return nil, st, fmt.Errorf("model output is not a valid review: %w: %s", err, truncate(string(raw), 200))
+	}
+	return &res, st, nil
+}
+
+func RunSingle(ctx context.Context, llm *ollama.Client, system, user string, schema json.RawMessage) (json.RawMessage, Stats, error) {
+	var st Stats
+	messages := []ollama.Message{
+		{Role: "system", Content: system},
+		{Role: "user", Content: user},
+	}
+	msg, u, err := llm.Chat(ctx, messages, nil, schema)
+	if err != nil {
+		return nil, st, err
+	}
+	st.Usage.Add(u)
+	st.Rounds = 1
+	return json.RawMessage(extractJSON(msg.Content)), st, nil
+}
+
+type Verdict struct {
+	Verdict  string `json:"verdict"`
+	Severity string `json:"severity"`
+	Body     string `json:"body"`
+	Reason   string `json:"reason"`
+}
+
+func VerifyFinding(ctx context.Context, llm *ollama.Client, repo Repo, header string, c Comment, fileDiff string, lim Limits, log *slog.Logger) (Verdict, Stats, error) {
+	var b strings.Builder
+	b.WriteString(header)
+	fmt.Fprintf(&b, "\nFinding to check (severity %s) at %s line %d:\n%s\n", c.Severity, c.Path, c.Line, c.Body)
+	if fileDiff != "" {
+		b.WriteString("\nDiff of that file, each line prefixed with its line number in the new version:\n")
+		b.WriteString(fileDiff)
+	}
+	messages := []ollama.Message{
+		{Role: "system", Content: VerifyPrompt},
+		{Role: "user", Content: b.String()},
+	}
+	schema := verifyTools[len(verifyTools)-1].Function.Parameters
+	raw, st, err := runLoop(ctx, llm, repo, messages, verifyTools, "submit_verdict", schema, lim, log)
+	if err != nil {
+		return Verdict{}, st, err
+	}
+	var v Verdict
+	if err := json.Unmarshal(raw, &v); err != nil {
+		return Verdict{}, st, fmt.Errorf("verdict is not valid JSON: %w", err)
+	}
+	return v, st, nil
+}
+
+func truncate(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "..."
 }
 
 func Layout(ctx context.Context, repo Repo, files []string) string {
@@ -189,30 +291,4 @@ func Layout(ctx context.Context, repo Repo, files []string) string {
 		}
 	}
 	return b.String()
-}
-
-func RunSingle(ctx context.Context, llm *ollama.Client, system, user string) (*Result, Stats, error) {
-	var st Stats
-	messages := []ollama.Message{
-		{Role: "system", Content: system},
-		{Role: "user", Content: user},
-	}
-	msg, u, err := llm.Chat(ctx, messages, nil, Schema)
-	if err != nil {
-		return nil, st, err
-	}
-	st.Usage.Add(u)
-	st.Rounds = 1
-	res, err := ParseResult(msg.Content)
-	if err != nil {
-		return nil, st, fmt.Errorf("%w: %s", err, truncate(msg.Content, 200))
-	}
-	return res, st, nil
-}
-
-func truncate(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	return s[:n] + "..."
 }

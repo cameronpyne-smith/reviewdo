@@ -61,6 +61,8 @@ type Review struct {
 	MaxComments  int      `json:"max_comments"`
 	MaxToolCalls int      `json:"max_tool_calls"`
 	MaxOutput    int      `json:"max_output_tokens"`
+	PartBytes    int      `json:"part_bytes"`
+	Verify       *bool    `json:"verify"`
 	Timeout      Duration `json:"timeout"`
 	Ignore       []string `json:"ignore"`
 }
@@ -129,8 +131,15 @@ func (c *Config) applyDefaults() error {
 	if c.Review.MaxOutput == 0 {
 		c.Review.MaxOutput = 48000
 	}
+	if c.Review.PartBytes == 0 {
+		c.Review.PartBytes = 40000
+	}
+	if c.Review.Verify == nil {
+		v := true
+		c.Review.Verify = &v
+	}
 	if c.Review.Timeout.Duration == 0 {
-		c.Review.Timeout.Duration = 30 * time.Minute
+		c.Review.Timeout.Duration = 60 * time.Minute
 	}
 	if strings.HasPrefix(c.CloneDir, "~/") {
 		home, err := os.UserHomeDir()
