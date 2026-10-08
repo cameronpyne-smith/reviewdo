@@ -1,0 +1,22 @@
+{
+  "app_id": 5237228,
+  "installation_id": 169256497,
+  "poll_interval": "60s",
+  "label": "reviewdo",
+  "repos": [
+    {
+      "name": "remundo-xml/Remundo.Iac",
+      "instructions": ""
+    }
+  ],
+  "ollama": {
+    "url": "http://127.0.0.1:11434",
+    "model": "qwen3.6:35b",
+    "num_ctx": 32768,
+    "temperature": 0.2,
+    "timeout": "20m"
+  },
+  "review": {
+    "max_comments": 15
+  }
+}

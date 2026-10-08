@@ -1,0 +1,315 @@
+package poller
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"log/slog"
+	"net/http"
+	"regexp"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/cameronpyne-smith/reviewdo/internal/config"
+	"github.com/cameronpyne-smith/reviewdo/internal/diff"
+	"github.com/cameronpyne-smith/reviewdo/internal/github"
+	"github.com/cameronpyne-smith/reviewdo/internal/ollama"
+	"github.com/cameronpyne-smith/reviewdo/internal/review"
+	"github.com/cameronpyne-smith/reviewdo/internal/state"
+)
+
+type Poller struct {
+	cfg      *config.Config
+	gh       *github.Client
+	llm      *ollama.Client
+	st       *state.State
+	fresh    bool
+	botSlug  string
+	botLogin string
+	mention  *regexp.Regexp
+	log      *slog.Logger
+	DryRun   bool
+}
+
+var trustedAssociations = map[string]bool{"OWNER": true, "MEMBER": true, "COLLABORATOR": true}
+
+func New(cfg *config.Config, gh *github.Client, llm *ollama.Client, st *state.State, fresh bool, botSlug string, log *slog.Logger) *Poller {
+	return &Poller{
+		cfg:      cfg,
+		gh:       gh,
+		llm:      llm,
+		st:       st,
+		fresh:    fresh,
+		botSlug:  botSlug,
+		botLogin: botSlug + "[bot]",
+		mention:  regexp.MustCompile(`(?i)(^|\s)@` + regexp.QuoteMeta(botSlug) + `\s+review\b`),
+		log:      log,
+	}
+}
+
+func (p *Poller) Run(ctx context.Context) error {
+	t := time.NewTicker(p.cfg.PollInterval.Duration)
+	defer t.Stop()
+	for {
+		p.tick(ctx)
+		p.fresh = false
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-t.C:
+		}
+	}
+}
+
+func (p *Poller) tick(ctx context.Context) {
+	for _, repo := range p.cfg.Repos {
+		if ctx.Err() != nil {
+			return
+		}
+		if err := p.pollRepo(ctx, repo); err != nil {
+			p.log.Error("poll failed", "repo", repo.Name, "err", err)
+		}
+		if err := p.st.Save(p.cfg.StatePath); err != nil {
+			p.log.Error("save state failed", "err", err)
+		}
+	}
+}
+
+type trigger struct {
+	reason    string
+	commentID int64
+}
+
+func (p *Poller) pollRepo(ctx context.Context, repo config.Repo) error {
+	log := p.log.With("repo", repo.Name)
+	pulls, err := p.gh.ListOpenPulls(ctx, repo.Name)
+	if err != nil {
+		return fmt.Errorf("list pulls: %w", err)
+	}
+	rs, known := p.st.Repo(repo.Name)
+	baseline := !known
+	if baseline {
+		rs.CommentsSince = time.Now()
+		if p.fresh {
+			log.Info("first run: existing open pull requests will not be auto-reviewed, use a comment or label to review them", "open", len(pulls))
+		}
+	}
+
+	open := map[int]*github.Pull{}
+	for i := range pulls {
+		open[pulls[i].Number] = &pulls[i]
+	}
+	for key := range rs.Pulls {
+		n, _ := strconv.Atoi(key)
+		if _, ok := open[n]; !ok {
+			delete(rs.Pulls, key)
+		}
+	}
+
+	triggers, err := p.commentTriggers(ctx, repo.Name, rs, open)
+	if err != nil {
+		log.Error("comment scan failed", "err", err)
+	}
+
+	for _, pull := range pulls {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		key := strconv.Itoa(pull.Number)
+		ps := rs.Pulls[key]
+		if ps == nil {
+			ps = &state.Pull{Baselined: baseline && !pull.Draft}
+			rs.Pulls[key] = ps
+		}
+		ps.HeadSHA = pull.Head.SHA
+
+		var tr trigger
+		switch {
+		case triggers[pull.Number].commentID != 0:
+			tr = triggers[pull.Number]
+		case pull.HasLabel(p.cfg.Label) && ps.LabelSHA != pull.Head.SHA:
+			tr = trigger{reason: "label"}
+		case ps.ReviewedSHA == "" && !ps.Baselined && !pull.Draft:
+			tr = trigger{reason: "opened"}
+		default:
+			continue
+		}
+
+		if tr.reason == "label" {
+			ps.LabelSHA = pull.Head.SHA
+			if !p.DryRun {
+				if err := p.gh.RemoveLabel(ctx, repo.Name, pull.Number, p.cfg.Label); err != nil {
+					log.Warn("could not remove label; the app may need Issues write permission", "pr", pull.Number, "err", err)
+				}
+			}
+		}
+
+		plog := log.With("pr", pull.Number, "reason", tr.reason, "head", short(pull.Head.SHA))
+		plog.Info("reviewing")
+		start := time.Now()
+		if err := p.Review(ctx, repo, &pull, ps.ReviewedSHA); err != nil {
+			plog.Error("review failed", "err", err)
+			continue
+		}
+		ps.ReviewedSHA = pull.Head.SHA
+		ps.ReviewedAt = time.Now()
+		plog.Info("review posted", "took", time.Since(start).Round(time.Second))
+		if err := p.st.Save(p.cfg.StatePath); err != nil {
+			log.Error("save state failed", "err", err)
+		}
+	}
+	return nil
+}
+
+func (p *Poller) commentTriggers(ctx context.Context, repo string, rs *state.Repo, open map[int]*github.Pull) (map[int]trigger, error) {
+	out := map[int]trigger{}
+	comments, err := p.gh.IssueCommentsSince(ctx, repo, rs.CommentsSince)
+	if err != nil {
+		return out, err
+	}
+	for _, c := range comments {
+		if c.UpdatedAt.After(rs.CommentsSince) {
+			rs.CommentsSince = c.UpdatedAt
+		}
+		if c.ID <= rs.LastCommentID {
+			continue
+		}
+		rs.LastCommentID = c.ID
+		if c.User.Type == "Bot" || c.User.Login == p.botLogin || !p.mention.MatchString(c.Body) {
+			continue
+		}
+		n := c.IssueNumber()
+		if _, ok := open[n]; !ok {
+			continue
+		}
+		if !trustedAssociations[c.AuthorAssociation] {
+			p.log.Warn("ignoring review request from untrusted commenter", "repo", repo, "pr", n, "user", c.User.Login, "association", c.AuthorAssociation)
+			continue
+		}
+		out[n] = trigger{reason: "comment", commentID: c.ID}
+		if !p.DryRun {
+			if err := p.gh.ReactToComment(ctx, repo, c.ID, "eyes"); err != nil {
+				p.log.Warn("could not react to comment", "repo", repo, "pr", n, "err", err)
+			}
+		}
+	}
+	return out, nil
+}
+
+func (p *Poller) Review(ctx context.Context, repo config.Repo, pull *github.Pull, previousSHA string) error {
+	fullDiff, err := p.gh.PullDiff(ctx, repo.Name, pull.Number)
+	if err != nil {
+		return fmt.Errorf("fetch diff: %w", err)
+	}
+	files := diff.Parse(fullDiff)
+	promptFiles := files
+	scope := review.Scope{ToSHA: pull.Head.SHA}
+	if previousSHA != "" && previousSHA != pull.Head.SHA {
+		if inc := p.incrementalDiff(ctx, repo.Name, previousSHA, pull.Head.SHA); inc != nil {
+			promptFiles = inc
+			scope = review.Scope{Incremental: true, FromSHA: previousSHA, ToSHA: pull.Head.SHA}
+		}
+	}
+
+	prompt := review.BuildPrompt(review.Input{
+		Repo:         repo.Name,
+		Pull:         pull,
+		Instructions: repo.Instructions,
+		Scope:        scope,
+		Files:        promptFiles,
+		Ignore:       p.cfg.Review.Ignore,
+		MaxBytes:     p.cfg.Review.MaxDiffBytes,
+	})
+	p.log.Debug("prompt built", "pr", pull.Number, "files", len(prompt.Shown), "ignored", len(prompt.Ignored), "omitted", len(prompt.Omitted), "bytes", len(prompt.Text))
+	if len(prompt.Shown) == 0 {
+		p.log.Info("nothing reviewable in diff", "pr", pull.Number)
+		if p.DryRun {
+			return nil
+		}
+		_, err := p.gh.CreateReview(ctx, repo.Name, pull.Number, github.ReviewRequest{
+			CommitID: pull.Head.SHA,
+			Event:    "COMMENT",
+			Body:     fmt.Sprintf("## Reviewdo review\n\nNo reviewable changes (%s). All changed files are ignored or binary.", scope),
+		})
+		return err
+	}
+
+	raw, usage, err := p.llm.Chat(ctx, review.SystemPrompt, prompt.Text, review.Schema)
+	if err != nil {
+		return err
+	}
+	p.log.Info("model responded", "pr", pull.Number, "model", p.llm.Model(), "prompt_tokens", usage.PromptTokens, "output_tokens", usage.OutputTokens, "took", usage.Duration.Round(time.Second))
+	res, err := review.ParseResult(raw)
+	if err != nil {
+		p.log.Debug("raw model output", "output", raw)
+		return err
+	}
+	out := review.Render(res, files, scope, p.cfg.Review.MaxComments, p.botSlug, p.cfg.Label)
+
+	if p.DryRun {
+		fmt.Printf("=== %s#%d (%s) ===\n\n%s\n", repo.Name, pull.Number, scope, out.Body)
+		for _, c := range out.Comments {
+			fmt.Printf("--- %s:%d\n%s\n\n", c.Path, c.Line, c.Body)
+		}
+		return nil
+	}
+
+	req := github.ReviewRequest{CommitID: pull.Head.SHA, Body: out.Body, Event: "COMMENT", Comments: out.Comments}
+	rv, err := p.gh.CreateReview(ctx, repo.Name, pull.Number, req)
+	if github.IsStatus(err, http.StatusUnprocessableEntity) && len(out.Comments) > 0 {
+		p.log.Warn("inline comments rejected, posting them in the review body", "pr", pull.Number, "err", err)
+		req.Comments = nil
+		req.Body = review.FoldComments(out)
+		rv, err = p.gh.CreateReview(ctx, repo.Name, pull.Number, req)
+	}
+	if err != nil {
+		return fmt.Errorf("post review: %w", err)
+	}
+	p.log.Info("review url", "pr", pull.Number, "url", rv.HTMLURL, "inline", len(req.Comments))
+	return nil
+}
+
+func (p *Poller) incrementalDiff(ctx context.Context, repo, from, to string) []*diff.File {
+	cmp, err := p.gh.Compare(ctx, repo, from, to)
+	if err != nil {
+		p.log.Info("compare unavailable, reviewing full diff", "repo", repo, "err", err)
+		return nil
+	}
+	if cmp.Status != "ahead" {
+		p.log.Info("history rewritten, reviewing full diff", "repo", repo, "status", cmp.Status)
+		return nil
+	}
+	for _, c := range cmp.Commits {
+		if len(c.Parents) > 1 {
+			p.log.Info("merge commit since last review, reviewing full diff", "repo", repo, "commit", short(c.SHA))
+			return nil
+		}
+	}
+	d, err := p.gh.CompareDiff(ctx, repo, from, to)
+	if err != nil {
+		p.log.Info("compare diff unavailable, reviewing full diff", "repo", repo, "err", err)
+		return nil
+	}
+	files := diff.Parse(d)
+	if len(files) == 0 {
+		return nil
+	}
+	return files
+}
+
+func short(sha string) string {
+	if len(sha) > 7 {
+		return sha[:7]
+	}
+	return sha
+}
+
+func ParseRef(s string) (repo string, number int, err error) {
+	repo, numStr, ok := strings.Cut(s, "#")
+	if !ok || strings.Count(repo, "/") != 1 {
+		return "", 0, errors.New("expected owner/repo#number")
+	}
+	number, err = strconv.Atoi(numStr)
+	return repo, number, err
+}
