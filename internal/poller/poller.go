@@ -268,7 +268,7 @@ func (p *Poller) Review(ctx context.Context, repoCfg config.Repo, pull *github.P
 	var total review.Stats
 	start := time.Now()
 	budget := p.cfg.Review.TimeBudget.Duration
-	reserve := budget / 5
+	reserve := budget * 2 / 5
 	perPart := (budget - reserve) / time.Duration(len(groups))
 	for i, group := range groups {
 		lim.Deadline = start.Add(perPart*time.Duration(i+1) - 20*time.Second)
@@ -318,6 +318,7 @@ func (p *Poller) Review(ctx context.Context, repoCfg config.Repo, pull *github.P
 		}
 		var kept []review.Comment
 		rejected = nil
+		unverified := 0
 		verifyDeadline := start.Add(budget - 20*time.Second)
 		for _, c := range res.Comments {
 			if c.Severity != "critical" && c.Severity != "major" {
@@ -325,10 +326,8 @@ func (p *Poller) Review(ctx context.Context, repoCfg config.Repo, pull *github.P
 				continue
 			}
 			if time.Now().After(verifyDeadline) {
-				log.Warn("no time left to verify, downgrading", "path", c.Path, "line", c.Line, "was", c.Severity)
-				c.Severity = "minor"
-				c.Body = "Unverified: " + c.Body
-				kept = append(kept, c)
+				log.Warn("no time left to verify, dropping", "path", c.Path, "line", c.Line, "was", c.Severity)
+				unverified++
 				continue
 			}
 			v, st, err := review.VerifyFinding(ctx, p.llm, repo, header, c, fileDiffs[c.Path], review.Limits{MaxToolCalls: 12, MaxOutput: p.cfg.Review.MaxOutput / 2, Deadline: verifyDeadline}, log.With("verify", c.Path))
@@ -353,6 +352,9 @@ func (p *Poller) Review(ctx context.Context, repoCfg config.Repo, pull *github.P
 			kept = append(kept, c)
 		}
 		res.Comments = kept
+		if unverified > 0 {
+			res.Unverified = unverified
+		}
 	}
 
 	if len(parts) > 1 || len(rejected) > 0 || adjusted {

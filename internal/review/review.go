@@ -197,10 +197,11 @@ type FileSummary struct {
 }
 
 type Result struct {
-	Verdict  string        `json:"verdict"`
-	Summary  string        `json:"summary"`
-	Files    []FileSummary `json:"files"`
-	Comments []Comment     `json:"comments"`
+	Verdict    string        `json:"verdict"`
+	Summary    string        `json:"summary"`
+	Files      []FileSummary `json:"files"`
+	Comments   []Comment     `json:"comments"`
+	Unverified int           `json:"-"`
 }
 
 func (r *Result) UnmarshalJSON(b []byte) error {
@@ -419,6 +420,9 @@ func Render(res *Result, files []*diff.File, scope Scope, maxComments int, botSl
 	}
 	if len(out.Dropped) > 0 {
 		fmt.Fprintf(&b, "\n%d lower-severity comments were not posted to keep this review short.\n", len(out.Dropped))
+	}
+	if res.Unverified > 0 {
+		fmt.Fprintf(&b, "\n%d possible issue(s) could not be verified within the time budget and were not posted. Re-run the review to check them.\n", res.Unverified)
 	}
 	var rows []string
 	for _, f := range res.Files {

@@ -97,7 +97,7 @@ func runLoop(ctx context.Context, llm *ollama.Client, repo Repo, messages []olla
 			log.Warn("output budget exhausted, forcing the final answer", "output_tokens", st.OutputTokens)
 			return finalise(ctx, llm, messages, final, finalSchema, &st)
 		}
-		if !lim.Deadline.IsZero() && time.Now().After(lim.Deadline) && len(msg.ToolCalls) > 0 {
+		if !lim.Deadline.IsZero() && time.Now().After(lim.Deadline) && !(len(msg.ToolCalls) == 0 && looksLikeJSON(msg.Content)) {
 			log.Info("time budget exhausted, forcing the final answer", "rounds", st.Rounds, "tool_calls", st.ToolCalls)
 			return finalise(ctx, llm, messages, final, finalSchema, &st)
 		}
