@@ -299,6 +299,7 @@ func (p *Poller) Review(ctx context.Context, repoCfg config.Repo, pull *github.P
 		parts = append(parts, res)
 	}
 	res := review.Merge(parts)
+	var rejected []review.Comment
 
 	if repo != nil && p.cfg.Review.Verify != nil && *p.cfg.Review.Verify {
 		fileDiffs := map[string]string{}
@@ -306,6 +307,7 @@ func (p *Poller) Review(ctx context.Context, repoCfg config.Repo, pull *github.P
 			fileDiffs[f.Path] = f.Render()
 		}
 		var kept []review.Comment
+		rejected = nil
 		for _, c := range res.Comments {
 			if c.Severity != "critical" && c.Severity != "major" {
 				kept = append(kept, c)
@@ -320,6 +322,7 @@ func (p *Poller) Review(ctx context.Context, repoCfg config.Repo, pull *github.P
 			}
 			log.Info("verified finding", "path", c.Path, "line", c.Line, "was", c.Severity, "verdict", v.Verdict, "now", v.Severity, "reason", v.Reason, "took", st.Duration.Round(time.Second))
 			if v.Verdict == "rejected" {
+				rejected = append(rejected, c)
 				continue
 			}
 			if v.Verdict == "downgraded" || v.Severity != c.Severity {
@@ -334,7 +337,7 @@ func (p *Poller) Review(ctx context.Context, repoCfg config.Repo, pull *github.P
 	}
 
 	if len(parts) > 1 {
-		raw, st, err := review.RunSingle(ctx, p.llm, review.SynthesisPrompt, review.SynthesisInput(header, parts, res.Comments), review.SynthesisSchema)
+		raw, st, err := review.RunSingle(ctx, p.llm, review.SynthesisPrompt, review.SynthesisInput(header, parts, res.Comments, rejected), review.SynthesisSchema)
 		total.Merge(st)
 		if err != nil {
 			return err

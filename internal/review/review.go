@@ -219,21 +219,27 @@ var SynthesisSchema = json.RawMessage(`{
   "required": ["verdict", "summary"]
 }`)
 
-const SynthesisPrompt = `You are Reviewdo, an automated code reviewer. A large pull request was reviewed in parts. You are given the pull request details, each part's summary, and the findings that survived verification. Write the overall review: a verdict (ready, caution or blocked) and one short paragraph summarising what the change does and your assessment, consistent with the findings. Do not invent findings that are not listed. Respond with JSON only.`
+const SynthesisPrompt = `You are Reviewdo, an automated code reviewer. A large pull request was reviewed in parts. You are given the pull request details, each part's summary, the findings that survived verification, and the findings that verification rejected. Write the overall review: a verdict (ready, caution or blocked) and one short paragraph summarising what the change does and your assessment. The verdict and summary must rest only on the surviving findings. A part summary may mention a problem that was later rejected; treat such problems as not existing and never mention them. Blocked requires at least one surviving critical finding. Respond with JSON only.`
 
-func SynthesisInput(header string, parts []*Result, comments []Comment) string {
+func SynthesisInput(header string, parts []*Result, comments, rejected []Comment) string {
 	var b strings.Builder
 	b.WriteString(header)
-	b.WriteString("\nPart summaries:\n")
+	b.WriteString("\nPart summaries (may mention problems that were later rejected):\n")
 	for i, r := range parts {
 		fmt.Fprintf(&b, "%d. (%s) %s\n", i+1, r.Verdict, strings.TrimSpace(r.Summary))
 	}
-	b.WriteString("\nFindings:\n")
+	b.WriteString("\nSurviving findings:\n")
 	if len(comments) == 0 {
 		b.WriteString("(none)\n")
 	}
 	for _, c := range comments {
 		fmt.Fprintf(&b, "- [%s] %s:%d: %s\n", c.Severity, c.Path, c.Line, strings.TrimSpace(c.Body))
+	}
+	if len(rejected) > 0 {
+		b.WriteString("\nRejected on verification, these are not problems and must not be mentioned:\n")
+		for _, c := range rejected {
+			fmt.Fprintf(&b, "- %s:%d: %s\n", c.Path, c.Line, truncate(strings.TrimSpace(c.Body), 200))
+		}
 	}
 	return b.String()
 }
@@ -302,15 +308,22 @@ func verdict(res *Result) string {
 	if _, ok := verdictRank[v]; !ok {
 		v = "caution"
 	}
+	critical := false
 	for _, c := range res.Comments {
 		switch c.Severity {
 		case "critical":
-			v = "blocked"
+			critical = true
 		case "major":
 			if verdictRank[v] < verdictRank["caution"] {
 				v = "caution"
 			}
 		}
+	}
+	if critical {
+		return "blocked"
+	}
+	if v == "blocked" {
+		return "caution"
 	}
 	return v
 }
