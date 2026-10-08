@@ -103,7 +103,7 @@ See `deploy/config.example.json`. Fields:
 | `ollama.model` | | required |
 | `ollama.num_ctx` | `32768` | context window requested from Ollama |
 | `ollama.num_predict` | `12288` | output tokens per model round, thinking included; stops runaway deliberation |
-| `ollama.think` | unset | `true`/`false` for models that support thinking |
+| `ollama.think` | unset | `true`/`false`, or an effort level such as `"low"` for models that support one |
 | `review.max_diff_bytes` | `3 × num_ctx` | diff budget; remaining files are listed by name |
 | `review.max_comments` | `15` | inline comments per review, highest severity first |
 | `review.part_bytes` | `40000` | diff bytes per review part; larger PRs are split into parts |

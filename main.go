@@ -30,7 +30,7 @@ Commands:
   review owner/repo#N      review one pull request and print the result
   review -post owner/repo#N
                            review one pull request and post it to GitHub
-  review -model m -think true|false owner/repo#N
+  review -model m -think v owner/repo#N
                            review with a different model or thinking setting
 `
 
@@ -103,7 +103,7 @@ func setup(ctx context.Context, cfgPath string) (*app, error) {
 		return nil, fmt.Errorf("authenticate as app: %w", err)
 	}
 	o := cfg.Ollama
-	llm := ollama.New(o.URL, o.Model, o.NumCtx, o.NumPredict, o.Temperature, o.Think, o.Timeout.Duration)
+	llm := ollama.New(o.URL, o.Model, o.NumCtx, o.NumPredict, o.Temperature, o.Think.Value(), o.Timeout.Duration)
 	return &app{cfg: cfg, gh: gh, llm: llm, slug: ga.Slug}, nil
 }
 
@@ -238,7 +238,7 @@ func reviewOne(ctx context.Context, cfgPath string, args []string, log *slog.Log
 	fs := flag.NewFlagSet("review", flag.ExitOnError)
 	post := fs.Bool("post", false, "post the review to GitHub instead of printing it")
 	model := fs.String("model", "", "override ollama.model")
-	think := fs.String("think", "", "override ollama.think (true or false)")
+	think := fs.String("think", "", "override ollama.think (true, false or a level such as low)")
 	fs.Parse(args)
 	if fs.NArg() != 1 {
 		return errors.New("usage: reviewdo review [-post] owner/repo#N")
@@ -257,10 +257,9 @@ func reviewOne(ctx context.Context, cfgPath string, args []string, log *slog.Log
 			o.Model = *model
 		}
 		if *think != "" {
-			v := *think == "true"
-			o.Think = &v
+			o.Think = config.ParseThink(*think)
 		}
-		a.llm = ollama.New(o.URL, o.Model, o.NumCtx, o.NumPredict, o.Temperature, o.Think, o.Timeout.Duration)
+		a.llm = ollama.New(o.URL, o.Model, o.NumCtx, o.NumPredict, o.Temperature, o.Think.Value(), o.Timeout.Duration)
 	}
 	repo := config.Repo{Name: repoName}
 	for _, r := range a.cfg.Repos {

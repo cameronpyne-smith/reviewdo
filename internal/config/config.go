@@ -52,7 +52,7 @@ type Ollama struct {
 	NumCtx      int      `json:"num_ctx"`
 	NumPredict  int      `json:"num_predict"`
 	Temperature float64  `json:"temperature"`
-	Think       *bool    `json:"think"`
+	Think       Think    `json:"think"`
 	Timeout     Duration `json:"timeout"`
 }
 
@@ -214,4 +214,37 @@ func (c *Config) validate() error {
 		errs = append(errs, errors.New("poll_interval must be at least 10s"))
 	}
 	return errors.Join(errs...)
+}
+
+type Think struct {
+	v any
+}
+
+func (t *Think) UnmarshalJSON(b []byte) error {
+	var v any
+	if err := json.Unmarshal(b, &v); err != nil {
+		return err
+	}
+	switch v.(type) {
+	case nil, bool, string:
+		t.v = v
+		return nil
+	}
+	return fmt.Errorf("think must be true, false or a level name such as \"low\"")
+}
+
+func (t Think) MarshalJSON() ([]byte, error) { return json.Marshal(t.v) }
+
+func (t Think) Value() any { return t.v }
+
+func ParseThink(s string) Think {
+	switch s {
+	case "":
+		return Think{}
+	case "true":
+		return Think{v: true}
+	case "false":
+		return Think{v: false}
+	}
+	return Think{v: s}
 }

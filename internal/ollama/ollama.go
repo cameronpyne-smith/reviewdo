@@ -16,11 +16,11 @@ type Client struct {
 	numCtx      int
 	numPredict  int
 	temperature float64
-	think       *bool
+	think       any
 	http        *http.Client
 }
 
-func New(url, model string, numCtx, numPredict int, temperature float64, think *bool, timeout time.Duration) *Client {
+func New(url, model string, numCtx, numPredict int, temperature float64, think any, timeout time.Duration) *Client {
 	return &Client{
 		url:         url,
 		model:       model,
@@ -34,9 +34,9 @@ func New(url, model string, numCtx, numPredict int, temperature float64, think *
 
 func (c *Client) Model() string { return c.model }
 
-func (c *Client) WithThink(think bool) *Client {
+func (c *Client) WithThink(think any) *Client {
 	cp := *c
-	cp.think = &think
+	cp.think = think
 	return &cp
 }
 
@@ -74,7 +74,7 @@ type chatRequest struct {
 	Tools     []Tool          `json:"tools,omitempty"`
 	Stream    bool            `json:"stream"`
 	Format    json.RawMessage `json:"format,omitempty"`
-	Think     *bool           `json:"think,omitempty"`
+	Think     any             `json:"think,omitempty"`
 	KeepAlive string          `json:"keep_alive"`
 	Options   map[string]any  `json:"options"`
 }
