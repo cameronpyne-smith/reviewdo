@@ -230,7 +230,7 @@ func (p *Poller) Review(ctx context.Context, repo config.Repo, pull *github.Pull
 		_, err := p.gh.CreateReview(ctx, repo.Name, pull.Number, github.ReviewRequest{
 			CommitID: pull.Head.SHA,
 			Event:    "COMMENT",
-			Body:     fmt.Sprintf("## 🟢 Ready to merge\n\nNo reviewable changes %s. All changed files are ignored or binary.", scope),
+			Body:     fmt.Sprintf("## 🟢 Ready to merge ✅\n\nNo reviewable changes %s. All changed files are ignored or binary.", scope),
 		})
 		return err
 	}

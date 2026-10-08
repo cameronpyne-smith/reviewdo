@@ -178,9 +178,9 @@ var severityRank = map[string]int{"critical": 0, "major": 1, "minor": 2, "nit": 
 var verdictRank = map[string]int{"ready": 0, "caution": 1, "blocked": 2}
 
 var verdictLabel = map[string]string{
-	"ready":   "🟢 Ready to merge",
+	"ready":   "🟢 Ready to merge ✅",
 	"caution": "🟡 Merge with care 🤞",
-	"blocked": "🔴 Changes requested",
+	"blocked": "🔴 Changes requested ⏳",
 }
 
 func verdict(res *Result) string {
