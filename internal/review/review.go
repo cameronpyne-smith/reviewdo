@@ -12,7 +12,7 @@ import (
 
 const SystemPrompt = `You are Reviewdo, an automated code reviewer. You are given a pull request diff and respond with JSON only.
 
-Look for problems that matter: bugs, incorrect logic, security issues, secrets or credentials in code, data loss, race conditions, missing error handling, misconfiguration, breaking changes, and clear maintainability problems. Do not comment on formatting, naming preferences, or anything a linter would catch. Do not praise. Do not describe what the change does unless it is needed to explain a problem. If the change looks good, say so briefly and return an empty comments list.
+Look for problems that matter: bugs, incorrect logic, security issues, secrets or credentials in code, data loss, race conditions, missing error handling, misconfiguration, breaking changes, and clear maintainability problems. Also check that what the change says is true: statements in documentation, comments, the PR description and runbooks must match what actually exists in the repository, and a change to one environment or component should be consistent with its siblings unless the difference is deliberate. Do not comment on formatting, naming preferences, or anything a linter would catch. Do not raise generic best-practice advice that is not grounded in this repository. Do not praise. If the change looks good, say so briefly and return an empty comments list.
 
 Each diff line is prefixed with its line number in the new version of the file, then the diff marker: "+" added, "-" removed, " " unchanged. Removed lines have no line number and cannot receive comments. Only comment on lines that have a line number.
 
@@ -22,6 +22,9 @@ Respond with a JSON object of this shape:
 {
   "verdict": "ready" | "caution" | "blocked",
   "summary": "one short paragraph: what the change does and your overall assessment",
+  "files": [
+    {"path": "file path exactly as shown after ###", "description": "one short sentence on what changed in this file"}
+  ],
   "comments": [
     {
       "path": "file path exactly as shown after ###",
@@ -40,6 +43,17 @@ var Schema = json.RawMessage(`{
   "properties": {
     "verdict": {"type": "string", "enum": ["ready", "caution", "blocked"]},
     "summary": {"type": "string"},
+    "files": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "path": {"type": "string"},
+          "description": {"type": "string"}
+        },
+        "required": ["path", "description"]
+      }
+    },
     "comments": {
       "type": "array",
       "items": {
@@ -54,7 +68,7 @@ var Schema = json.RawMessage(`{
       }
     }
   },
-  "required": ["verdict", "summary", "comments"]
+  "required": ["verdict", "summary", "files", "comments"]
 }`)
 
 type Scope struct {
@@ -153,10 +167,16 @@ type Comment struct {
 	Body     string `json:"body"`
 }
 
+type FileSummary struct {
+	Path        string `json:"path"`
+	Description string `json:"description"`
+}
+
 type Result struct {
-	Verdict  string    `json:"verdict"`
-	Summary  string    `json:"summary"`
-	Comments []Comment `json:"comments"`
+	Verdict  string        `json:"verdict"`
+	Summary  string        `json:"summary"`
+	Files    []FileSummary `json:"files"`
+	Comments []Comment     `json:"comments"`
 }
 
 func ParseResult(raw string) (*Result, error) {
@@ -270,6 +290,14 @@ func Render(res *Result, files []*diff.File, scope Scope, maxComments int, botSl
 	}
 	if len(out.Dropped) > 0 {
 		fmt.Fprintf(&b, "\n%d lower-severity comments were not posted to keep this review short.\n", len(out.Dropped))
+	}
+	if len(res.Files) > 0 {
+		b.WriteString("\n<details>\n<summary><strong>What changed</strong></summary>\n\n| File | Change |\n| --- | --- |\n")
+		for _, f := range res.Files {
+			desc := strings.ReplaceAll(strings.TrimSpace(f.Description), "|", "\\|")
+			fmt.Fprintf(&b, "| `%s` | %s |\n", strings.TrimSpace(f.Path), desc)
+		}
+		b.WriteString("\n</details>\n")
 	}
 	fmt.Fprintf(&b, "\n<sub>Reviewed %s. Re-run with `@%s review` or the `%s` label.</sub>\n", scope, botSlug, label)
 	out.Body = b.String()

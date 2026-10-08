@@ -26,6 +26,7 @@ Commands:
   run                      poll configured repositories and review pull requests (default)
   check                    verify key, GitHub access, installation repos and Ollama
   pulls owner/repo         list open pull requests
+  reviews owner/repo#N     print the reviews already on a pull request
   review owner/repo#N      review one pull request and print the result
   review -post owner/repo#N
                            review one pull request and post it to GitHub
@@ -66,6 +67,8 @@ func main() {
 		err = check(ctx, *cfgPath)
 	case "pulls":
 		err = listPulls(ctx, *cfgPath, args)
+	case "reviews":
+		err = showReviews(ctx, *cfgPath, args)
 	case "review":
 		err = reviewOne(ctx, *cfgPath, args, log)
 	default:
@@ -192,6 +195,41 @@ func listPulls(ctx context.Context, cfgPath string, args []string) error {
 			draft = " (draft)"
 		}
 		fmt.Printf("#%-5d %-8s %-20s %s%s\n", p.Number, p.Head.SHA[:7], p.User.Login, p.Title, draft)
+	}
+	return nil
+}
+
+func showReviews(ctx context.Context, cfgPath string, args []string) error {
+	if len(args) != 1 {
+		return errors.New("usage: reviewdo reviews owner/repo#N")
+	}
+	repo, number, err := poller.ParseRef(args[0])
+	if err != nil {
+		return err
+	}
+	a, err := setup(ctx, cfgPath)
+	if err != nil {
+		return err
+	}
+	reviews, err := a.gh.ListReviews(ctx, repo, number)
+	if err != nil {
+		return err
+	}
+	comments, err := a.gh.ListReviewComments(ctx, repo, number)
+	if err != nil {
+		return err
+	}
+	for _, r := range reviews {
+		if r.State == "COMMENTED" && strings.TrimSpace(r.Body) == "" {
+			continue
+		}
+		fmt.Printf("=== %s  %s  %s  %s\n\n%s\n", r.User.Login, r.State, r.SubmittedAt.Local().Format("2006-01-02 15:04"), r.CommitID[:7], strings.TrimSpace(r.Body))
+		for _, c := range comments {
+			if c.PullRequestReviewID == r.ID {
+				fmt.Printf("\n--- %s:%d\n%s\n", c.Path, c.Line, strings.TrimSpace(c.Body))
+			}
+		}
+		fmt.Println()
 	}
 	return nil
 }

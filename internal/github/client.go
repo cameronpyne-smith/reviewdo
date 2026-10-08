@@ -370,3 +370,54 @@ func (c *Client) CreateReview(ctx context.Context, repo string, number int, req 
 	}
 	return &out, nil
 }
+
+type PullReview struct {
+	ID          int64     `json:"id"`
+	Body        string    `json:"body"`
+	State       string    `json:"state"`
+	HTMLURL     string    `json:"html_url"`
+	SubmittedAt time.Time `json:"submitted_at"`
+	CommitID    string    `json:"commit_id"`
+	User        struct {
+		Login string `json:"login"`
+	} `json:"user"`
+}
+
+type PullReviewComment struct {
+	ID                  int64  `json:"id"`
+	PullRequestReviewID int64  `json:"pull_request_review_id"`
+	Path                string `json:"path"`
+	Line                int    `json:"line"`
+	Body                string `json:"body"`
+	User                struct {
+		Login string `json:"login"`
+	} `json:"user"`
+}
+
+func (c *Client) ListReviews(ctx context.Context, repo string, number int) ([]PullReview, error) {
+	var all []PullReview
+	for page := 1; ; page++ {
+		var out []PullReview
+		if err := c.get(ctx, paged(fmt.Sprintf("/repos/%s/pulls/%d/reviews", repo, number), page, url.Values{}), &out); err != nil {
+			return nil, err
+		}
+		all = append(all, out...)
+		if len(out) < perPage {
+			return all, nil
+		}
+	}
+}
+
+func (c *Client) ListReviewComments(ctx context.Context, repo string, number int) ([]PullReviewComment, error) {
+	var all []PullReviewComment
+	for page := 1; ; page++ {
+		var out []PullReviewComment
+		if err := c.get(ctx, paged(fmt.Sprintf("/repos/%s/pulls/%d/comments", repo, number), page, url.Values{}), &out); err != nil {
+			return nil, err
+		}
+		all = append(all, out...)
+		if len(out) < perPage {
+			return all, nil
+		}
+	}
+}
