@@ -274,7 +274,7 @@ func (p *Poller) Review(ctx context.Context, repoCfg config.Repo, pull *github.P
 	var res *review.Result
 	var st review.Stats
 	if repo != nil {
-		res, st, err = review.RunAgent(ctx, p.llm, repo, review.SystemPrompt, prompt.Text, p.cfg.Review.MaxToolCalls, p.log.With("pr", pull.Number))
+		res, st, err = review.RunAgent(ctx, p.llm, repo, review.SystemPrompt, prompt.Text, p.cfg.Review.MaxToolCalls, p.cfg.Review.MaxOutput, p.log.With("pr", pull.Number))
 	} else {
 		res, st, err = review.RunSingle(ctx, p.llm, review.SystemPrompt, prompt.Text)
 	}

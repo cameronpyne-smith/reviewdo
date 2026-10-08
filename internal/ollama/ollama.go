@@ -14,16 +14,18 @@ type Client struct {
 	url         string
 	model       string
 	numCtx      int
+	numPredict  int
 	temperature float64
 	think       *bool
 	http        *http.Client
 }
 
-func New(url, model string, numCtx int, temperature float64, think *bool, timeout time.Duration) *Client {
+func New(url, model string, numCtx, numPredict int, temperature float64, think *bool, timeout time.Duration) *Client {
 	return &Client{
 		url:         url,
 		model:       model,
 		numCtx:      numCtx,
+		numPredict:  numPredict,
 		temperature: temperature,
 		think:       think,
 		http:        &http.Client{Timeout: timeout},
@@ -74,6 +76,7 @@ type chatRequest struct {
 type chatResponse struct {
 	Message         Message `json:"message"`
 	Done            bool    `json:"done"`
+	DoneReason      string  `json:"done_reason"`
 	Error           string  `json:"error"`
 	PromptEvalCount int     `json:"prompt_eval_count"`
 	EvalCount       int     `json:"eval_count"`
@@ -84,12 +87,14 @@ type Usage struct {
 	PromptTokens int
 	OutputTokens int
 	Duration     time.Duration
+	Truncated    bool
 }
 
 func (u *Usage) Add(o Usage) {
 	u.PromptTokens = max(u.PromptTokens, o.PromptTokens)
 	u.OutputTokens += o.OutputTokens
 	u.Duration += o.Duration
+	u.Truncated = o.Truncated
 }
 
 func (c *Client) Chat(ctx context.Context, messages []Message, tools []Tool, format json.RawMessage) (Message, Usage, error) {
@@ -102,6 +107,7 @@ func (c *Client) Chat(ctx context.Context, messages []Message, tools []Tool, for
 		KeepAlive: "15m",
 		Options: map[string]any{
 			"num_ctx":     c.numCtx,
+			"num_predict": c.numPredict,
 			"temperature": c.temperature,
 		},
 	}
@@ -137,6 +143,7 @@ func (c *Client) Chat(ctx context.Context, messages []Message, tools []Tool, for
 		PromptTokens: out.PromptEvalCount,
 		OutputTokens: out.EvalCount,
 		Duration:     time.Duration(out.TotalDuration),
+		Truncated:    out.DoneReason == "length",
 	}
 	return out.Message, u, nil
 }

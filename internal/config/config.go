@@ -50,6 +50,7 @@ type Ollama struct {
 	URL         string   `json:"url"`
 	Model       string   `json:"model"`
 	NumCtx      int      `json:"num_ctx"`
+	NumPredict  int      `json:"num_predict"`
 	Temperature float64  `json:"temperature"`
 	Think       *bool    `json:"think"`
 	Timeout     Duration `json:"timeout"`
@@ -59,6 +60,7 @@ type Review struct {
 	MaxDiffBytes int      `json:"max_diff_bytes"`
 	MaxComments  int      `json:"max_comments"`
 	MaxToolCalls int      `json:"max_tool_calls"`
+	MaxOutput    int      `json:"max_output_tokens"`
 	Timeout      Duration `json:"timeout"`
 	Ignore       []string `json:"ignore"`
 }
@@ -109,6 +111,9 @@ func (c *Config) applyDefaults() error {
 	if c.Ollama.NumCtx == 0 {
 		c.Ollama.NumCtx = 32768
 	}
+	if c.Ollama.NumPredict == 0 {
+		c.Ollama.NumPredict = 12288
+	}
 	if c.Ollama.Timeout.Duration == 0 {
 		c.Ollama.Timeout.Duration = 20 * time.Minute
 	}
@@ -120,6 +125,9 @@ func (c *Config) applyDefaults() error {
 	}
 	if c.Review.MaxToolCalls == 0 {
 		c.Review.MaxToolCalls = 60
+	}
+	if c.Review.MaxOutput == 0 {
+		c.Review.MaxOutput = 48000
 	}
 	if c.Review.Timeout.Duration == 0 {
 		c.Review.Timeout.Duration = 30 * time.Minute

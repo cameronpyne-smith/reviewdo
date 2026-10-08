@@ -97,9 +97,11 @@ See `deploy/config.example.json`. Fields:
 | `repos[].instructions`, `repos[].instructions_file` | | guidance for that repo only |
 | `ollama.model` | | required |
 | `ollama.num_ctx` | `32768` | context window requested from Ollama |
+| `ollama.num_predict` | `12288` | output tokens per model round, thinking included; stops runaway deliberation |
 | `ollama.think` | unset | `true`/`false` for models that support thinking |
 | `review.max_diff_bytes` | `3 × num_ctx` | diff budget; remaining files are listed by name |
 | `review.max_comments` | `15` | inline comments per review, highest severity first |
 | `review.timeout` | `30m` | deadline for one whole review, including queueing behind other requests |
+| `review.max_output_tokens` | `48000` | total output tokens per review before the final answer is forced |
 | `review.max_tool_calls` | `60` | file reads, listings and searches the model may make per review |
 | `review.ignore` | lockfiles, vendor, minified, generated | glob on basename or path, `dir/` for prefixes |

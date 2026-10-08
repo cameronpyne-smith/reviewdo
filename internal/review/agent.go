@@ -46,7 +46,7 @@ type Stats struct {
 	Rounds    int
 }
 
-func RunAgent(ctx context.Context, llm *ollama.Client, repo Repo, system, user string, maxCalls int, log *slog.Logger) (*Result, Stats, error) {
+func RunAgent(ctx context.Context, llm *ollama.Client, repo Repo, system, user string, maxCalls, maxOutput int, log *slog.Logger) (*Result, Stats, error) {
 	var st Stats
 	messages := []ollama.Message{
 		{Role: "system", Content: system + ToolPrompt},
@@ -60,8 +60,21 @@ func RunAgent(ctx context.Context, llm *ollama.Client, repo Repo, system, user s
 		}
 		st.Usage.Add(u)
 		messages = append(messages, msg)
+		log.Debug("round", "n", st.Rounds, "output_tokens", u.OutputTokens, "truncated", u.Truncated, "tool_calls", len(msg.ToolCalls))
 
+		if st.OutputTokens > maxOutput {
+			log.Warn("output budget exhausted, forcing the final review", "output_tokens", st.OutputTokens)
+			return finalise(ctx, llm, messages, st)
+		}
 		if len(msg.ToolCalls) == 0 {
+			if u.Truncated && msg.Content == "" {
+				nudges++
+				if nudges > 2 {
+					return finalise(ctx, llm, messages, st)
+				}
+				messages = append(messages, ollama.Message{Role: "user", Content: "Your reasoning was cut off. Decide now with what you have: call a tool or submit_review, without further deliberation."})
+				continue
+			}
 			if st.ToolCalls == 0 && nudges == 0 {
 				nudges++
 				messages = append(messages, ollama.Message{Role: "user", Content: "You have not read anything from the repository. Use the tools to open the files this change depends on, then call submit_review."})

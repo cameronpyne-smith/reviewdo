@@ -103,7 +103,7 @@ func setup(ctx context.Context, cfgPath string) (*app, error) {
 		return nil, fmt.Errorf("authenticate as app: %w", err)
 	}
 	o := cfg.Ollama
-	llm := ollama.New(o.URL, o.Model, o.NumCtx, o.Temperature, o.Think, o.Timeout.Duration)
+	llm := ollama.New(o.URL, o.Model, o.NumCtx, o.NumPredict, o.Temperature, o.Think, o.Timeout.Duration)
 	return &app{cfg: cfg, gh: gh, llm: llm, slug: ga.Slug}, nil
 }
 
@@ -260,7 +260,7 @@ func reviewOne(ctx context.Context, cfgPath string, args []string, log *slog.Log
 			v := *think == "true"
 			o.Think = &v
 		}
-		a.llm = ollama.New(o.URL, o.Model, o.NumCtx, o.Temperature, o.Think, o.Timeout.Duration)
+		a.llm = ollama.New(o.URL, o.Model, o.NumCtx, o.NumPredict, o.Temperature, o.Think, o.Timeout.Duration)
 	}
 	repo := config.Repo{Name: repoName}
 	for _, r := range a.cfg.Repos {
