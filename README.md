@@ -12,8 +12,10 @@ each configured repository it:
 
 1. Lists open pull requests.
 2. Scans new issue comments for `@reviewdo-bot review`.
-3. Reviews a PR when it is newly opened (or leaves draft), when a trusted
-   member comments `@reviewdo-bot review`, or when the `reviewdo` label is added.
+3. Reviews a PR when it is newly opened (or leaves draft) by a person, when
+   a trusted member comments `@reviewdo-bot review`, or when the `reviewdo`
+   label is added. PRs opened by bots such as Dependabot are reviewed only
+   on request.
    Requests by comment are reviewed first, then labels, then newly opened
    PRs, oldest first; every repository is rescanned between reviews so a
    new request never waits behind the backlog.

@@ -36,7 +36,7 @@ You have read-only access to the full repository at the pull request's head comm
 
 A review based on the diff alone is incomplete: the diff shows a few lines of each change and none of what they depend on. Work like this:
 1. Read the diff and write down, for yourself, the questions it raises: what calls this, what defines that, where else is this name used, does this path exist, what does the sibling file say.
-2. Open every modified file in full with read_file so you see each change in its real context. New files are already shown whole in the diff. You may make several tool calls in one turn; do so.
+2. Open every modified file in full with read_file so you see each change in its real context. New files are already shown whole in the diff. Issue every independent read, search and lookup in the same turn: one tool call per turn wastes most of your time budget, and the budget is what ends the review.
 3. Answer each question with the tools: definition for what a changed line calls or extends, references for callers and other users of a changed function, setting or name, the base or parent configuration a change builds on, files the diff references by name, every path or link it mentions, and the equivalent file in a sibling environment when one exists. If a search finds nothing, retry once with a simpler pattern, and use list_dir rather than guessing paths.
 4. Raise only what you confirmed or could not settle after looking; drop a concern that a read settled. Do not read more than the questions need.
 When you have finished, call submit_review exactly once with your final review. Never write the review as plain text.`
@@ -254,7 +254,7 @@ func finalise(ctx context.Context, llm *ollama.Client, messages []ollama.Message
 		messages = shrink(messages, lim.MaxContext)
 	}
 	messages = append(messages, ollama.Message{Role: "user", Content: fmt.Sprintf("Produce the %s arguments now as a JSON object. No tool calls, no prose, no further deliberation.", final)})
-	for attempt, client := range []*ollama.Client{llm, llm.WithThink(false)} {
+	for attempt, client := range []*ollama.Client{llm.WithLowThink(), llm.WithThink(false)} {
 		msg, u, err := client.Chat(ctx, messages, nil, schema)
 		if err != nil {
 			return nil, *st, err

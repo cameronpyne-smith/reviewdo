@@ -42,6 +42,13 @@ func (c *Client) WithThink(think any) *Client {
 	return &cp
 }
 
+func (c *Client) WithLowThink() *Client {
+	if s, ok := c.think.(string); ok && s != "" {
+		return c.WithThink("low")
+	}
+	return c.WithThink(false)
+}
+
 type Message struct {
 	Role       string     `json:"role"`
 	Content    string     `json:"content"`

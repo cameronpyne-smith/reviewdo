@@ -280,6 +280,7 @@ type Pull struct {
 	Base      Ref       `json:"base"`
 	User      struct {
 		Login string `json:"login"`
+		Type  string `json:"type"`
 	} `json:"user"`
 	Labels []struct {
 		Name string `json:"name"`

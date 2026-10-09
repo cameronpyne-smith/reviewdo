@@ -221,7 +221,7 @@ func (p *Poller) scanRepo(ctx context.Context, repo config.Repo) ([]job, error) 
 		case pull.HasLabel(p.cfg.Label) && ps.LabelSHA != pull.Head.SHA:
 			tr = trigger{reason: "label", at: pull.UpdatedAt}
 			ps.LabelSHA = pull.Head.SHA
-		case ps.ReviewedSHA == "" && !ps.Baselined && !pull.Draft && ps.FailedSHA != pull.Head.SHA:
+		case ps.ReviewedSHA == "" && !ps.Baselined && !pull.Draft && ps.FailedSHA != pull.Head.SHA && pull.User.Type != "Bot":
 			tr = trigger{reason: "opened", at: pull.CreatedAt}
 		default:
 			continue
