@@ -496,12 +496,17 @@ func (p *Poller) ReviewAt(ctx context.Context, repoCfg config.Repo, pull *github
 		}
 		lim.Deadline = lim.Deadline.Add(-20 * time.Second)
 		lim.MustRead = mustRead(group, p.cfg.Review.Ignore, 6)
+		var symbols string
+		if repo != nil {
+			symbols = review.Symbols(ctx, repo, group)
+		}
 		prompt := review.BuildPrompt(review.Input{
 			Repo:     repoCfg.Name,
 			Pull:     pull,
 			Guidance: guidance,
 			Scope:    scope,
 			Layout:   layout,
+			Symbols:  symbols,
 			Files:    group,
 			AllFiles: promptPaths,
 			Ignore:   p.cfg.Review.Ignore,

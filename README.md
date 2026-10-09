@@ -19,8 +19,10 @@ each configured repository it:
    Requests by comment are reviewed first, then labels, then newly opened
    PRs, oldest first; every repository is rescanned between reviews so a
    new request never waits behind the backlog.
-4. Fetches the diff, lets the model read the repository at the PR's head
-   commit through read-only tools, and posts the result as a review: a
+4. Fetches the diff, lists every declaration the diff adds, changes or
+   removes with where the repository uses that name, lets the model read
+   the repository at the PR's head commit through read-only tools, and
+   posts the result as a review: a
    verdict, a one-line summary, a findings list with each finding's
    severity and title linked to its inline comment, and a collapsed table
    of what changed.

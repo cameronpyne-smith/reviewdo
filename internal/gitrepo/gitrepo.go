@@ -303,3 +303,7 @@ func (r *Repo) SearchAt(ctx context.Context, ref, pattern, p string) (string, er
 	}
 	return b.String(), nil
 }
+
+func Open(dir, head, base string) *Repo {
+	return &Repo{dir: dir, head: head, base: base}
+}

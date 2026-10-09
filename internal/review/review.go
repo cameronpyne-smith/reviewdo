@@ -115,6 +115,7 @@ type Input struct {
 	Guidance string
 	Scope    Scope
 	Layout   string
+	Symbols  string
 	Files    []*diff.File
 	AllFiles []string
 	Ignore   []string
@@ -160,6 +161,10 @@ func BuildPrompt(in Input) Prompt {
 	if in.Layout != "" {
 		b.WriteString("\nRepository layout at the head commit (root and the directories touched by this change):\n")
 		b.WriteString(in.Layout)
+	}
+	if in.Symbols != "" {
+		b.WriteString("\n")
+		b.WriteString(in.Symbols)
 	}
 
 	var body strings.Builder
