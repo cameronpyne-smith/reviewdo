@@ -344,37 +344,20 @@ var verdictLabel = map[string]string{
 }
 
 func verdict(res *Result) string {
-	v := res.Verdict
-	if _, ok := verdictRank[v]; !ok {
-		v = "caution"
-	}
-	critical, findings := false, 0
+	v := "ready"
 	for _, c := range res.Comments {
 		if strings.TrimSpace(c.Body) == "" {
 			continue
 		}
-		findings++
 		switch c.Severity {
 		case "critical":
-			critical = true
+			return "blocked"
 		case "major":
-			if verdictRank[v] < verdictRank["caution"] {
-				v = "caution"
-			}
-		}
-	}
-	if critical {
-		return "blocked"
-	}
-	if res.Unverified > 0 || res.SkippedParts > 0 {
-		if verdictRank[v] < verdictRank["caution"] {
 			v = "caution"
 		}
-	} else if findings == 0 {
-		return "ready"
 	}
-	if v == "blocked" {
-		return "caution"
+	if res.Unverified > 0 || res.SkippedParts > 0 {
+		v = "caution"
 	}
 	return v
 }
