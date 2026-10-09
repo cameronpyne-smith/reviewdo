@@ -18,9 +18,9 @@ each configured repository it:
    commit through read-only tools, and posts the result as a review with
    inline comments.
 
-With `clone_dir` set, every configured repository is cloned there in the
-background when the service starts, so the first review of a repository is
-not delayed by a clone, and the PR head is fetched before every review. The model reads files
+With `clone_dir` set, each configured repository is cloned there on first
+use and the PR head is fetched before every review. `reviewdo clone` clones
+them all up front so no first review waits on a clone. The model reads files
 with `git show <sha>:<path>`, so nothing is ever checked out and the working
 tree can be used normally. Without `clone_dir`, reviews use the diff alone.
 
@@ -71,6 +71,7 @@ journalctl -fu reviewdo
 
 ```
 reviewdo -config config.json check                       # verify key, access, model
+reviewdo -config config.json clone                       # clone every configured repo now
 reviewdo -config config.json pulls owner/repo            # list open PRs
 reviewdo -config config.json review owner/repo#12        # dry run, prints the review
 reviewdo -config config.json review -post owner/repo#12  # post it

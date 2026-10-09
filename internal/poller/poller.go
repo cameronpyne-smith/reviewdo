@@ -11,7 +11,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/cameronpyne-smith/reviewdo/internal/config"
@@ -35,8 +34,6 @@ type Poller struct {
 	mention  *regexp.Regexp
 	log      *slog.Logger
 	repos    []config.Repo
-	warming  sync.Mutex
-	warmed   map[string]time.Time
 	DryRun   bool
 }
 
@@ -58,7 +55,6 @@ func New(cfg *config.Config, gh *github.Client, llm *ollama.Client, st *state.St
 		botLogin: botSlug + "[bot]",
 		mention:  regexp.MustCompile(`(?i)(^|\s)@` + regexp.QuoteMeta(botSlug) + `\s+review\b`),
 		log:      log,
-		warmed:   map[string]time.Time{},
 	}
 }
 
@@ -99,37 +95,8 @@ func (p *Poller) resolveRepos(ctx context.Context) []config.Repo {
 	return repos
 }
 
-func (p *Poller) warm(ctx context.Context, repos []config.Repo) {
-	if p.store == nil || !p.warming.TryLock() {
-		return
-	}
-	go func() {
-		defer p.warming.Unlock()
-		for _, r := range repos {
-			if ctx.Err() != nil {
-				return
-			}
-			if p.store.Cloned(r.Name) {
-				continue
-			}
-			if t, ok := p.warmed[r.Name]; ok && time.Since(t) < time.Hour {
-				continue
-			}
-			p.warmed[r.Name] = time.Now()
-			start := time.Now()
-			if _, err := p.store.Clone(ctx, r.Name); err != nil {
-				p.log.Warn("pre-clone failed, will retry in an hour", "repo", r.Name, "err", err)
-				continue
-			}
-			p.log.Info("pre-cloned", "repo", r.Name, "took", time.Since(start).Round(time.Second))
-		}
-	}()
-}
-
 func (p *Poller) tick(ctx context.Context) {
-	repos := p.resolveRepos(ctx)
-	p.warm(ctx, repos)
-	for _, repo := range repos {
+	for _, repo := range p.resolveRepos(ctx) {
 		if ctx.Err() != nil {
 			return
 		}

@@ -15,6 +15,7 @@ import (
 
 	"github.com/cameronpyne-smith/reviewdo/internal/config"
 	"github.com/cameronpyne-smith/reviewdo/internal/github"
+	"github.com/cameronpyne-smith/reviewdo/internal/gitrepo"
 	"github.com/cameronpyne-smith/reviewdo/internal/ollama"
 	"github.com/cameronpyne-smith/reviewdo/internal/poller"
 	"github.com/cameronpyne-smith/reviewdo/internal/state"
@@ -25,6 +26,7 @@ const usage = `Usage: reviewdo [-config path] [-v] <command>
 Commands:
   run                      poll configured repositories and review pull requests (default)
   check                    verify key, GitHub access, installation repos and Ollama
+  clone                    clone every configured repository into clone_dir now
   pulls owner/repo         list open pull requests
   reviews owner/repo#N     print the reviews already on a pull request
   review owner/repo#N      review one pull request and print the result
@@ -65,6 +67,8 @@ func main() {
 		err = run(ctx, *cfgPath, log)
 	case "check":
 		err = check(ctx, *cfgPath)
+	case "clone":
+		err = cloneAll(ctx, *cfgPath, log)
 	case "pulls":
 		err = listPulls(ctx, *cfgPath, args)
 	case "reviews":
@@ -120,6 +124,53 @@ func run(ctx context.Context, cfgPath string, log *slog.Logger) error {
 	}
 	log.Info("starting", "app", a.slug, "model", a.cfg.Ollama.Model, "repos", len(a.cfg.Repos), "interval", a.cfg.PollInterval.Duration, "state", a.cfg.StatePath)
 	return poller.New(a.cfg, a.gh, a.llm, st, !existed, a.slug, log).Run(ctx)
+}
+
+func cloneAll(ctx context.Context, cfgPath string, log *slog.Logger) error {
+	a, err := setup(ctx, cfgPath)
+	if err != nil {
+		return err
+	}
+	if a.cfg.CloneDir == "" {
+		return errors.New("clone_dir is not set")
+	}
+	store := &gitrepo.Store{Dir: a.cfg.CloneDir, Token: a.gh.Token}
+	repos := a.cfg.Repos
+	if a.cfg.HasWildcard() {
+		all, err := a.gh.InstallationRepositories(ctx)
+		if err != nil {
+			return err
+		}
+		var names []string
+		for _, r := range all {
+			if !r.Archived {
+				names = append(names, r.FullName)
+			}
+		}
+		repos = a.cfg.Resolve(names)
+	}
+	done, failed := 0, 0
+	for _, r := range repos {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if store.Cloned(r.Name) {
+			continue
+		}
+		start := time.Now()
+		if _, err := store.Clone(ctx, r.Name); err != nil {
+			failed++
+			log.Error("clone failed", "repo", r.Name, "err", err)
+			continue
+		}
+		done++
+		log.Info("cloned", "repo", r.Name, "took", time.Since(start).Round(time.Second))
+	}
+	fmt.Printf("cloned %d of %d repositories, %d already present, %d failed\n", done, len(repos), len(repos)-done-failed, failed)
+	if failed > 0 {
+		return fmt.Errorf("%d clones failed", failed)
+	}
+	return nil
 }
 
 func check(ctx context.Context, cfgPath string) error {
