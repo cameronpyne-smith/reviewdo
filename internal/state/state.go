@@ -23,6 +23,7 @@ type Pull struct {
 	ReviewedSHA string    `json:"reviewed_sha,omitempty"`
 	ReviewedAt  time.Time `json:"reviewed_at,omitempty"`
 	LabelSHA    string    `json:"label_sha,omitempty"`
+	FailedSHA   string    `json:"failed_sha,omitempty"`
 	Baselined   bool      `json:"baselined,omitempty"`
 }
 

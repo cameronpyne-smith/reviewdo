@@ -206,11 +206,12 @@ type FileSummary struct {
 }
 
 type Result struct {
-	Verdict    string        `json:"verdict"`
-	Summary    string        `json:"summary"`
-	Files      []FileSummary `json:"files"`
-	Comments   []Comment     `json:"comments"`
-	Unverified int           `json:"-"`
+	Verdict      string        `json:"verdict"`
+	Summary      string        `json:"summary"`
+	Files        []FileSummary `json:"files"`
+	Comments     []Comment     `json:"comments"`
+	Unverified   int           `json:"-"`
+	SkippedParts int           `json:"-"`
 }
 
 func (r *Result) UnmarshalJSON(b []byte) error {
@@ -363,7 +364,11 @@ func verdict(res *Result) string {
 	if critical {
 		return "blocked"
 	}
-	if findings == 0 && res.Unverified == 0 {
+	if res.Unverified > 0 || res.SkippedParts > 0 {
+		if verdictRank[v] < verdictRank["caution"] {
+			v = "caution"
+		}
+	} else if findings == 0 {
 		return "ready"
 	}
 	if v == "blocked" {
@@ -439,6 +444,9 @@ func Render(res *Result, files []*diff.File, scope Scope, maxComments int, botSl
 	}
 	if res.Unverified > 0 {
 		fmt.Fprintf(&b, "\n%d possible issue(s) could not be verified within the time budget and were not posted. Re-run the review to check them.\n", res.Unverified)
+	}
+	if res.SkippedParts > 0 {
+		fmt.Fprintf(&b, "\nThe review ran out of time: %d part(s) of this pull request were not reviewed. Re-run the review to cover them.\n", res.SkippedParts)
 	}
 	var rows []string
 	for _, f := range res.Files {

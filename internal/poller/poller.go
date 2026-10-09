@@ -170,7 +170,7 @@ func (p *Poller) pollRepo(ctx context.Context, repo config.Repo) error {
 			tr = triggers[pull.Number]
 		case pull.HasLabel(p.cfg.Label) && ps.LabelSHA != pull.Head.SHA:
 			tr = trigger{reason: "label"}
-		case ps.ReviewedSHA == "" && !ps.Baselined && !pull.Draft:
+		case ps.ReviewedSHA == "" && !ps.Baselined && !pull.Draft && ps.FailedSHA != pull.Head.SHA:
 			tr = trigger{reason: "opened"}
 		default:
 			continue
@@ -194,7 +194,8 @@ func (p *Poller) pollRepo(ctx context.Context, repo config.Repo) error {
 			}
 		}
 		if err != nil {
-			plog.Error("review failed", "err", err)
+			ps.FailedSHA = pull.Head.SHA
+			plog.Error("review failed; it will run again on a new commit, comment or label", "err", err)
 			continue
 		}
 		ps.ReviewedSHA = pull.Head.SHA
@@ -389,8 +390,14 @@ func (p *Poller) ReviewAt(ctx context.Context, repoCfg config.Repo, pull *github
 	if d, ok := ctx.Deadline(); ok && d.Before(hard) {
 		hard = d
 	}
+	skipped := 0
 	for i, group := range groups {
 		partStart := time.Now()
+		if i > 0 && partStart.After(hard.Add(-reserve-20*time.Second)) {
+			skipped = len(groups) - i
+			log.Warn("no time left, skipping remaining parts", "reviewed", i, "skipped", skipped)
+			break
+		}
 		lim.Deadline = start.Add(perPart * time.Duration(i+1))
 		if floor := partStart.Add(p.cfg.Review.PartTime.Duration); floor.After(lim.Deadline) {
 			lim.Deadline = floor
@@ -436,6 +443,7 @@ func (p *Poller) ReviewAt(ctx context.Context, repoCfg config.Repo, pull *github
 		return nil, errors.New("every part of the review failed")
 	}
 	res := review.Merge(parts)
+	res.SkippedParts = skipped
 	var rejected []review.Comment
 	adjusted := false
 
