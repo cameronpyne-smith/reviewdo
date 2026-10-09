@@ -34,6 +34,8 @@ func New(url, model string, numCtx, numPredict int, temperature float64, think a
 
 func (c *Client) Model() string { return c.model }
 
+func (c *Client) NumCtx() int { return c.numCtx }
+
 func (c *Client) WithThink(think any) *Client {
 	cp := *c
 	cp.think = think

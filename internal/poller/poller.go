@@ -395,7 +395,8 @@ func (p *Poller) ReviewAt(ctx context.Context, repoCfg config.Repo, pull *github
 	}
 	guidance := review.RenderInstructions(p.cfg.Instructions, repoCfg.Instructions, repoInstructions)
 	header := review.Header(repoCfg.Name, pull)
-	lim := review.Limits{MaxToolCalls: p.cfg.Review.MaxToolCalls, MaxOutput: p.cfg.Review.MaxOutput}
+	maxContext := p.cfg.Ollama.NumCtx * 4 / 5
+	lim := review.Limits{MaxToolCalls: p.cfg.Review.MaxToolCalls, MaxOutput: p.cfg.Review.MaxOutput, MaxContext: maxContext}
 
 	groups := review.Groups(promptFiles, p.cfg.Review.Ignore, p.cfg.Review.PartBytes)
 	if len(groups) == 0 {
@@ -428,7 +429,7 @@ func (p *Poller) ReviewAt(ctx context.Context, repoCfg config.Repo, pull *github
 			lim.Deadline = last
 		}
 		lim.Deadline = lim.Deadline.Add(-20 * time.Second)
-		lim.MustRead = mustRead(group, p.cfg.Review.Ignore, 10)
+		lim.MustRead = mustRead(group, p.cfg.Review.Ignore, 6)
 		prompt := review.BuildPrompt(review.Input{
 			Repo:     repoCfg.Name,
 			Pull:     pull,
@@ -518,7 +519,7 @@ func (p *Poller) ReviewAt(ctx context.Context, repoCfg config.Repo, pull *github
 				unverified++
 				continue
 			}
-			v, st, err := review.VerifyFinding(ctx, p.llm, repo, header, c, fileDiffs[c.Path], review.Limits{MaxToolCalls: 12, MaxOutput: p.cfg.Review.MaxOutput / 2, Deadline: verifyDeadline}, log.With("verify", c.Path))
+			v, st, err := review.VerifyFinding(ctx, p.llm, repo, header, c, fileDiffs[c.Path], review.Limits{MaxToolCalls: 12, MaxOutput: p.cfg.Review.MaxOutput / 2, MaxContext: maxContext, Deadline: verifyDeadline}, log.With("verify", c.Path))
 			total.Merge(st)
 			if err != nil {
 				log.Warn("verification failed, keeping finding", "path", c.Path, "line", c.Line, "err", err)

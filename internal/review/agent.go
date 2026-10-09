@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"strings"
 	"time"
 
@@ -25,7 +26,7 @@ type Repo interface {
 const ToolPrompt = `
 
 You have read-only access to the full repository at the pull request's head commit through these tools:
-- read_file(path): the contents of one file
+- read_file(path, start, end): the contents of one file, or only lines start to end; on a large file call outline first and read the ranges you need
 - list_dir(path): entries in a directory ("" for the root)
 - search(pattern, path): extended-regex grep across the repository, optionally limited to a path
 - search_base(pattern, path): the same grep on the base branch, which is already merged and running; a construct found there is known to work
@@ -47,8 +48,8 @@ Re-read the lines the finding points at and whatever else is needed to decide wh
 Call submit_verdict exactly once with: verdict (confirmed, downgraded or rejected), severity (critical, major, minor or nit; the severity it should be posted at), body, and reason (one sentence for the log). The body is the comment the author will read. Write it to the author about the code, never as a judgement on "the finding" or "the reviewer", and never mention this check. Remove any narration of what the reviewer did, searched or could not find. When the verdict is confirmed, return the original body unchanged. When it is downgraded, rewrite the body so it states accurately what is wrong and why it matters.`
 
 var reviewTools = []ollama.Tool{
-	fn("read_file", "Read one file from the repository at the pull request head commit.",
-		`{"type":"object","properties":{"path":{"type":"string","description":"path relative to the repository root"}},"required":["path"]}`),
+	fn("read_file", "Read one file from the repository at the pull request head commit, optionally only a range of lines.",
+		`{"type":"object","properties":{"path":{"type":"string","description":"path relative to the repository root"},"start":{"type":"integer","description":"first line to return, 1-based; omit for the whole file"},"end":{"type":"integer","description":"last line to return"}},"required":["path"]}`),
 	fn("list_dir", "List the entries of a directory in the repository. Directories end with a slash.",
 		`{"type":"object","properties":{"path":{"type":"string","description":"directory path relative to the repository root, empty for the root"}}}`),
 	fn("search", "Search file contents across the repository with an extended regular expression.",
@@ -95,8 +96,42 @@ func (s *Stats) Merge(o Stats) {
 type Limits struct {
 	MaxToolCalls int
 	MaxOutput    int
+	MaxContext   int
 	Deadline     time.Time
 	MustRead     []string
+}
+
+func approxTokens(messages []ollama.Message) int {
+	n := 0
+	for _, m := range messages {
+		n += len(m.Content) + len(m.Thinking)
+		for _, tc := range m.ToolCalls {
+			n += len(tc.Function.Arguments)
+		}
+	}
+	return n / 3
+}
+
+func shrink(messages []ollama.Message, budget int) []ollama.Message {
+	if len(messages) <= 2 || approxTokens(messages) <= budget {
+		return messages
+	}
+	head := messages[:2]
+	used := approxTokens(head)
+	var tail []ollama.Message
+	for i := len(messages) - 1; i >= 2; i-- {
+		t := approxTokens(messages[i : i+1])
+		if used+t > budget {
+			break
+		}
+		used += t
+		tail = append([]ollama.Message{messages[i]}, tail...)
+	}
+	for len(tail) > 0 && tail[0].Role == "tool" {
+		tail = tail[1:]
+	}
+	note := ollama.Message{Role: "user", Content: "Earlier tool results were removed to fit the context window."}
+	return append(append(append([]ollama.Message{}, head...), note), tail...)
 }
 
 func unread(must []string, read map[string]bool) []string {
@@ -117,19 +152,28 @@ func runLoop(ctx context.Context, llm *ollama.Client, repo Repo, messages []olla
 	for st.Rounds = 1; st.Rounds <= lim.MaxToolCalls+5; st.Rounds++ {
 		msg, u, err := llm.Chat(ctx, messages, tools, nil)
 		if err != nil {
+			if lim.MaxContext > 0 && strings.Contains(err.Error(), "no user query found") {
+				log.Warn("context window overflowed, forcing the final answer on a shortened history", "rounds", st.Rounds, "tool_calls", st.ToolCalls)
+				return finalise(ctx, llm, messages, final, finalSchema, lim, &st)
+			}
 			return nil, st, err
 		}
 		st.Usage.Add(u)
 		messages = append(messages, msg)
-		log.Debug("round", "n", st.Rounds, "output_tokens", u.OutputTokens, "truncated", u.Truncated, "tool_calls", len(msg.ToolCalls))
+		used := max(u.PromptTokens, approxTokens(messages))
+		log.Debug("round", "n", st.Rounds, "context", used, "output_tokens", u.OutputTokens, "truncated", u.Truncated, "tool_calls", len(msg.ToolCalls))
+		if lim.MaxContext > 0 && used > lim.MaxContext {
+			log.Info("context budget exhausted, forcing the final answer", "context", used, "rounds", st.Rounds, "tool_calls", st.ToolCalls)
+			return finalise(ctx, llm, messages, final, finalSchema, lim, &st)
+		}
 
 		if st.OutputTokens > lim.MaxOutput {
 			log.Warn("output budget exhausted, forcing the final answer", "output_tokens", st.OutputTokens)
-			return finalise(ctx, llm, messages, final, finalSchema, &st)
+			return finalise(ctx, llm, messages, final, finalSchema, lim, &st)
 		}
 		if !lim.Deadline.IsZero() && time.Now().After(lim.Deadline) && !(len(msg.ToolCalls) == 0 && looksLikeJSON(msg.Content)) {
 			log.Info("time budget exhausted, forcing the final answer", "rounds", st.Rounds, "tool_calls", st.ToolCalls)
-			return finalise(ctx, llm, messages, final, finalSchema, &st)
+			return finalise(ctx, llm, messages, final, finalSchema, lim, &st)
 		}
 		var missing []string
 		if final == "submit_review" && readNudges < 2 {
@@ -145,7 +189,7 @@ func runLoop(ctx context.Context, llm *ollama.Client, repo Repo, messages []olla
 			}
 			nudges++
 			if nudges > 2 {
-				return finalise(ctx, llm, messages, final, finalSchema, &st)
+				return finalise(ctx, llm, messages, final, finalSchema, lim, &st)
 			}
 			text := fmt.Sprintf("Call %s now with your final answer.", final)
 			if u.Truncated && msg.Content == "" {
@@ -189,18 +233,26 @@ func runLoop(ctx context.Context, llm *ollama.Client, repo Repo, messages []olla
 					}
 				}
 				log.Debug("tool", "name", name, "args", args, "bytes", len(content))
+				if lim.MaxContext > 0 && used+len(content)/3 > lim.MaxContext {
+					exhausted = true
+					content = "[output omitted: the context window is full]"
+				}
 			}
+			used += len(content) / 3
 			messages = append(messages, ollama.Message{Role: "tool", ToolName: name, ToolCallID: call.ID, Content: content})
 		}
 		if exhausted {
-			log.Info("tool budget exhausted, forcing the final answer", "rounds", st.Rounds, "tool_calls", st.ToolCalls)
-			return finalise(ctx, llm, messages, final, finalSchema, &st)
+			log.Info("tool or context budget exhausted, forcing the final answer", "rounds", st.Rounds, "tool_calls", st.ToolCalls, "context", used)
+			return finalise(ctx, llm, messages, final, finalSchema, lim, &st)
 		}
 	}
-	return finalise(ctx, llm, messages, final, finalSchema, &st)
+	return finalise(ctx, llm, messages, final, finalSchema, lim, &st)
 }
 
-func finalise(ctx context.Context, llm *ollama.Client, messages []ollama.Message, final string, schema json.RawMessage, st *Stats) (json.RawMessage, Stats, error) {
+func finalise(ctx context.Context, llm *ollama.Client, messages []ollama.Message, final string, schema json.RawMessage, lim Limits, st *Stats) (json.RawMessage, Stats, error) {
+	if lim.MaxContext > 0 {
+		messages = shrink(messages, lim.MaxContext)
+	}
 	messages = append(messages, ollama.Message{Role: "user", Content: fmt.Sprintf("Produce the %s arguments now as a JSON object. No tool calls, no prose, no further deliberation.", final)})
 	for attempt, client := range []*ollama.Client{llm, llm.WithThink(false)} {
 		msg, u, err := client.Chat(ctx, messages, nil, schema)
@@ -247,9 +299,22 @@ func runTool(ctx context.Context, repo Repo, name string, args map[string]any) s
 	}
 	var out string
 	var err error
+	num := func(k string) int {
+		switch v := args[k].(type) {
+		case float64:
+			return int(v)
+		case string:
+			n, _ := strconv.Atoi(v)
+			return n
+		}
+		return 0
+	}
 	switch name {
 	case "read_file":
 		out, err = repo.ReadFile(ctx, str("path"))
+		if err == nil {
+			out = lineRange(out, num("start"), num("end"))
+		}
 	case "list_dir":
 		out, err = repo.ListDir(ctx, str("path"))
 	case "search":
@@ -272,6 +337,26 @@ func runTool(ctx context.Context, repo Repo, name string, args map[string]any) s
 		return "(empty)"
 	}
 	return out
+}
+
+func lineRange(text string, start, end int) string {
+	if start <= 0 && end <= 0 {
+		return text
+	}
+	lines := strings.Split(text, "\n")
+	if start <= 0 {
+		start = 1
+	}
+	if end <= 0 || end > len(lines) {
+		end = len(lines)
+	}
+	if start > len(lines) {
+		return fmt.Sprintf("(file has %d lines)\n", len(lines))
+	}
+	if end < start {
+		end = start
+	}
+	return fmt.Sprintf("lines %d-%d of %d:\n%s\n", start, end, len(lines), strings.Join(lines[start-1:end], "\n"))
 }
 
 func RunAgent(ctx context.Context, llm *ollama.Client, repo Repo, system, user string, lim Limits, log *slog.Logger) (*Result, Stats, error) {
