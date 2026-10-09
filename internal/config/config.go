@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 )
@@ -44,6 +45,65 @@ type Repo struct {
 	Name             string `json:"name"`
 	Instructions     string `json:"instructions"`
 	InstructionsFile string `json:"instructions_file"`
+}
+
+func (r Repo) Wildcard() bool {
+	return strings.HasSuffix(r.Name, "/*")
+}
+
+func (r Repo) owner() string {
+	o, _, _ := strings.Cut(r.Name, "/")
+	return o
+}
+
+func (c *Config) HasWildcard() bool {
+	for _, r := range c.Repos {
+		if r.Wildcard() {
+			return true
+		}
+	}
+	return false
+}
+
+func (c *Config) Resolve(installed []string) []Repo {
+	seen := map[string]bool{}
+	var out []Repo
+	for _, r := range c.Repos {
+		if !r.Wildcard() && !seen[strings.ToLower(r.Name)] {
+			seen[strings.ToLower(r.Name)] = true
+			out = append(out, r)
+		}
+	}
+	names := append([]string{}, installed...)
+	sort.Strings(names)
+	for _, r := range c.Repos {
+		if !r.Wildcard() {
+			continue
+		}
+		for _, n := range names {
+			owner, _, _ := strings.Cut(n, "/")
+			if strings.EqualFold(owner, r.owner()) && !seen[strings.ToLower(n)] {
+				seen[strings.ToLower(n)] = true
+				out = append(out, Repo{Name: n, Instructions: r.Instructions})
+			}
+		}
+	}
+	return out
+}
+
+func (c *Config) RepoFor(name string) Repo {
+	for _, r := range c.Repos {
+		if strings.EqualFold(r.Name, name) {
+			return r
+		}
+	}
+	owner, _, _ := strings.Cut(name, "/")
+	for _, r := range c.Repos {
+		if r.Wildcard() && strings.EqualFold(r.owner(), owner) {
+			return Repo{Name: name, Instructions: r.Instructions}
+		}
+	}
+	return Repo{Name: name}
 }
 
 type Ollama struct {
@@ -207,8 +267,9 @@ func (c *Config) validate() error {
 		errs = append(errs, errors.New("at least one repo is required"))
 	}
 	for _, r := range c.Repos {
-		if strings.Count(r.Name, "/") != 1 {
-			errs = append(errs, fmt.Errorf("repo %q must be owner/name", r.Name))
+		owner, name, ok := strings.Cut(r.Name, "/")
+		if !ok || owner == "" || name == "" || strings.Contains(name, "/") {
+			errs = append(errs, fmt.Errorf("repo %q must be owner/name or owner/*", r.Name))
 		}
 	}
 	if c.Ollama.Model == "" {

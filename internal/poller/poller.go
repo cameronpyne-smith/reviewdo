@@ -33,6 +33,7 @@ type Poller struct {
 	botLogin string
 	mention  *regexp.Regexp
 	log      *slog.Logger
+	repos    []config.Repo
 	DryRun   bool
 }
 
@@ -71,8 +72,31 @@ func (p *Poller) Run(ctx context.Context) error {
 	}
 }
 
+func (p *Poller) resolveRepos(ctx context.Context) []config.Repo {
+	if !p.cfg.HasWildcard() {
+		return p.cfg.Repos
+	}
+	all, err := p.gh.InstallationRepositories(ctx)
+	if err != nil {
+		p.log.Error("list installation repositories failed, using the last known list", "known", len(p.repos), "err", err)
+		return p.repos
+	}
+	var names []string
+	for _, r := range all {
+		if !r.Archived {
+			names = append(names, r.FullName)
+		}
+	}
+	repos := p.cfg.Resolve(names)
+	if len(repos) != len(p.repos) {
+		p.log.Info("repositories resolved", "repos", len(repos), "accessible", len(all))
+	}
+	p.repos = repos
+	return repos
+}
+
 func (p *Poller) tick(ctx context.Context) {
-	for _, repo := range p.cfg.Repos {
+	for _, repo := range p.resolveRepos(ctx) {
 		if ctx.Err() != nil {
 			return
 		}

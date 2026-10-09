@@ -35,6 +35,14 @@ type Client struct {
 	mu       sync.Mutex
 	token    string
 	tokenExp time.Time
+
+	cmu   sync.Mutex
+	cache map[string]cached
+}
+
+type cached struct {
+	etag string
+	data []byte
 }
 
 type APIError struct {
@@ -91,17 +99,25 @@ func (c *Client) Token(ctx context.Context) (string, error) {
 }
 
 func (c *Client) request(ctx context.Context, method, path, auth, accept string, body any, out any) error {
+	_, data, _, err := c.call(ctx, method, path, auth, accept, body, "")
+	if err != nil {
+		return err
+	}
+	return decode(data, out)
+}
+
+func (c *Client) call(ctx context.Context, method, path, auth, accept string, body any, etag string) (int, []byte, http.Header, error) {
 	var rdr io.Reader
 	if body != nil {
 		b, err := json.Marshal(body)
 		if err != nil {
-			return err
+			return 0, nil, nil, err
 		}
 		rdr = bytes.NewReader(b)
 	}
 	req, err := http.NewRequestWithContext(ctx, method, baseURL+path, rdr)
 	if err != nil {
-		return err
+		return 0, nil, nil, err
 	}
 	req.Header.Set("Authorization", auth)
 	req.Header.Set("Accept", accept)
@@ -110,14 +126,20 @@ func (c *Client) request(ctx context.Context, method, path, auth, accept string,
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
+	if etag != "" {
+		req.Header.Set("If-None-Match", etag)
+	}
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return err
+		return 0, nil, nil, err
 	}
 	defer resp.Body.Close()
 	data, err := io.ReadAll(io.LimitReader(resp.Body, 50<<20))
 	if err != nil {
-		return err
+		return 0, nil, nil, err
+	}
+	if resp.StatusCode == http.StatusNotModified && etag != "" {
+		return resp.StatusCode, nil, resp.Header, nil
 	}
 	if resp.StatusCode >= 300 {
 		ae := &APIError{Status: resp.StatusCode}
@@ -133,8 +155,12 @@ func (c *Client) request(ctx context.Context, method, path, auth, accept string,
 		if resp.Header.Get("X-RateLimit-Remaining") == "0" {
 			ae.Message += " (rate limit resets at " + resp.Header.Get("X-RateLimit-Reset") + ")"
 		}
-		return ae
+		return resp.StatusCode, nil, resp.Header, ae
 	}
+	return resp.StatusCode, data, resp.Header, nil
+}
+
+func decode(data []byte, out any) error {
 	switch v := out.(type) {
 	case nil:
 	case *[]byte:
@@ -157,6 +183,32 @@ func (c *Client) do(ctx context.Context, method, path, accept string, body any, 
 
 func (c *Client) get(ctx context.Context, path string, out any) error {
 	return c.do(ctx, http.MethodGet, path, acceptJSON, nil, out)
+}
+
+func (c *Client) getCached(ctx context.Context, path string, out any) error {
+	tok, err := c.installationToken(ctx)
+	if err != nil {
+		return err
+	}
+	c.cmu.Lock()
+	prev, ok := c.cache[path]
+	c.cmu.Unlock()
+	status, data, hdr, err := c.call(ctx, http.MethodGet, path, "Bearer "+tok, acceptJSON, nil, prev.etag)
+	if err != nil {
+		return err
+	}
+	if status == http.StatusNotModified && ok {
+		return decode(prev.data, out)
+	}
+	if etag := hdr.Get("ETag"); etag != "" {
+		c.cmu.Lock()
+		if c.cache == nil {
+			c.cache = map[string]cached{}
+		}
+		c.cache[path] = cached{etag: etag, data: data}
+		c.cmu.Unlock()
+	}
+	return decode(data, out)
 }
 
 func (c *Client) getDiff(ctx context.Context, path string) ([]byte, error) {
@@ -191,6 +243,7 @@ func (c *Client) App(ctx context.Context) (*App, error) {
 type Repository struct {
 	FullName string `json:"full_name"`
 	Private  bool   `json:"private"`
+	Archived bool   `json:"archived"`
 }
 
 func (c *Client) InstallationRepositories(ctx context.Context) ([]Repository, error) {
@@ -199,7 +252,7 @@ func (c *Client) InstallationRepositories(ctx context.Context) ([]Repository, er
 		var out struct {
 			Repositories []Repository `json:"repositories"`
 		}
-		if err := c.get(ctx, paged("/installation/repositories", page, url.Values{}), &out); err != nil {
+		if err := c.getCached(ctx, paged("/installation/repositories", page, url.Values{}), &out); err != nil {
 			return nil, err
 		}
 		all = append(all, out.Repositories...)
@@ -247,7 +300,7 @@ func (c *Client) ListOpenPulls(ctx context.Context, repo string) ([]Pull, error)
 	for page := 1; ; page++ {
 		var out []Pull
 		q := url.Values{"state": {"open"}, "sort": {"updated"}, "direction": {"desc"}}
-		if err := c.get(ctx, paged("/repos/"+repo+"/pulls", page, q), &out); err != nil {
+		if err := c.getCached(ctx, paged("/repos/"+repo+"/pulls", page, q), &out); err != nil {
 			return nil, err
 		}
 		all = append(all, out...)
@@ -319,7 +372,7 @@ func (c *Client) IssueCommentsSince(ctx context.Context, repo string, since time
 	for page := 1; ; page++ {
 		var out []IssueComment
 		q := url.Values{"since": {since.UTC().Format(time.RFC3339)}, "sort": {"updated"}, "direction": {"asc"}}
-		if err := c.get(ctx, paged("/repos/"+repo+"/issues/comments", page, q), &out); err != nil {
+		if err := c.getCached(ctx, paged("/repos/"+repo+"/issues/comments", page, q), &out); err != nil {
 			return nil, err
 		}
 		all = append(all, out...)

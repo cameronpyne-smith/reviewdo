@@ -139,6 +139,23 @@ func check(ctx context.Context, cfgPath string) error {
 	fmt.Printf("installation:   %d, %d repositories accessible\n", a.cfg.InstallationID, len(repos))
 	var problems []error
 	for _, r := range a.cfg.Repos {
+		if r.Wildcard() {
+			n, archived := 0, 0
+			for _, ir := range repos {
+				if strings.EqualFold(strings.SplitN(ir.FullName, "/", 2)[0], strings.SplitN(r.Name, "/", 2)[0]) {
+					if ir.Archived {
+						archived++
+					} else {
+						n++
+					}
+				}
+			}
+			fmt.Printf("repo:           %s matches %d repositories (%d archived, skipped)\n", r.Name, n, archived)
+			if n == 0 {
+				problems = append(problems, fmt.Errorf("repo %s matches nothing", r.Name))
+			}
+			continue
+		}
 		if have[strings.ToLower(r.Name)] {
 			fmt.Printf("repo:           %s ok\n", r.Name)
 		} else {
@@ -263,12 +280,7 @@ func reviewOne(ctx context.Context, cfgPath string, args []string, log *slog.Log
 		}
 		a.llm = ollama.New(o.URL, o.Model, o.NumCtx, o.NumPredict, o.Temperature, o.Think.Value(), o.Timeout.Duration)
 	}
-	repo := config.Repo{Name: repoName}
-	for _, r := range a.cfg.Repos {
-		if strings.EqualFold(r.Name, repoName) {
-			repo = r
-		}
-	}
+	repo := a.cfg.RepoFor(repoName)
 	pull, err := a.gh.Pull(ctx, repoName, number)
 	if err != nil {
 		return err

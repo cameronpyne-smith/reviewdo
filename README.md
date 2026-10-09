@@ -6,7 +6,9 @@ Ollama model. No webhooks, no inbound connections, no repo checkout.
 ## How it works
 
 A single Go binary with no third-party dependencies polls GitHub every minute
-using a GitHub App installation token. For each configured repository it:
+using a GitHub App installation token. Polling uses conditional requests, so
+a repository with no new activity costs nothing against the rate limit. For
+each configured repository it:
 
 1. Lists open pull requests.
 2. Scans new issue comments for `@reviewdo-bot review`.
@@ -131,7 +133,7 @@ See `deploy/config.example.json`. Fields:
 | `clone_dir` | unset | where repositories are cloned; unset means diff-only reviews |
 | `poll_interval` | `60s` | |
 | `label` | `reviewdo` | label that triggers a review; removed afterwards |
-| `repos[].name` | | `owner/repo`, must be visible to the installation |
+| `repos[].name` | | `owner/repo`, or `owner/*` for every repository the installation can reach; archived repositories are skipped and the list is refreshed every poll |
 | `instructions`, `instructions_file` | | global review guidance for every repo, inline or from a file |
 | `repos[].instructions`, `repos[].instructions_file` | | guidance for that repo only |
 | `ollama.model` | | required |
