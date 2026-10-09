@@ -20,8 +20,8 @@ const (
 	cloneTimeout = 15 * time.Minute
 	maxFileBytes = 4 << 20
 	maxListLines = 500
-	maxGrepLines = 200
-	maxGrepBytes = 24 << 10
+	maxGrepLines = 120
+	maxGrepBytes = 12 << 10
 	maxGrepLine  = 400
 )
 
@@ -295,7 +295,7 @@ func formatGrep(out, prefix string) string {
 			continue
 		}
 		if n >= maxGrepLines || b.Len() >= maxGrepBytes {
-			b.WriteString("[more matches omitted, narrow the pattern or path]\n")
+			b.WriteString("[more matches omitted: narrow the pattern or path, or use references for a name]\n")
 			break
 		}
 		b.WriteString(truncateLine(strings.TrimPrefix(l, prefix), maxGrepLine))

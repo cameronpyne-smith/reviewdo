@@ -468,7 +468,12 @@ func (p *Poller) ReviewAt(ctx context.Context, repoCfg config.Repo, pull *github
 	maxContext := p.cfg.Ollama.NumCtx * 4 / 5
 	lim := review.Limits{MaxToolCalls: p.cfg.Review.MaxToolCalls, MaxOutput: p.cfg.Review.MaxOutput, MaxContext: maxContext}
 
-	groups := review.Groups(promptFiles, p.cfg.Review.Ignore, p.cfg.Review.PartBytes)
+	partBytes := p.cfg.Review.PartBytes
+	if room := p.cfg.Ollama.NumCtx*3*35/100 - len(guidance); room < partBytes {
+		partBytes = max(room, 20<<10)
+		log.Debug("part size reduced to leave room for reading", "part_bytes", partBytes, "guidance_bytes", len(guidance))
+	}
+	groups := review.Groups(promptFiles, p.cfg.Review.Ignore, partBytes)
 	if len(groups) == 0 {
 		return &Outcome{Files: files, Scope: scope, Empty: true}, nil
 	}

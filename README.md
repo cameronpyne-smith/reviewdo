@@ -178,7 +178,7 @@ See `deploy/config.example.json`. Fields:
 | `ollama.think` | unset | `true`/`false`, or an effort level such as `"low"` for models that support one |
 | `review.max_diff_bytes` | `3 × num_ctx` | diff budget; remaining files are listed by name |
 | `review.max_comments` | `15` | inline comments per review, highest severity first |
-| `review.part_bytes` | `40000` | diff bytes per review part; larger PRs are split into parts |
+| `review.part_bytes` | `40000` | diff bytes per review part; larger PRs are split into parts. Reduced automatically so that the diff and the review guidance together take at most 35% of the context window |
 | `review.part_time` | `2m` | minimum time for each part, so a large PR is read properly even when it overruns the budget |
 | `review.triage` | `true` | one fast model call before verification that drops findings which say nothing concrete (reassurance, "please verify", generic advice) and sets each finding's severity from fixed definitions |
 | `review.verify` | `true` | verify every finding with a second pass before posting, highest severity first |

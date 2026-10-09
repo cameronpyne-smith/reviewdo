@@ -47,6 +47,7 @@ func siblingDirs(ctx context.Context, repo Repo, parent, self string) []string {
 		}
 		return n
 	}
+	sort.Strings(dirs)
 	sort.SliceStable(dirs, func(i, j int) bool { return prefix(dirs[i], self) > prefix(dirs[j], self) })
 	return dirs
 }
