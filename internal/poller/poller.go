@@ -215,6 +215,9 @@ func (p *Poller) scanRepo(ctx context.Context, repo config.Repo) ([]job, error) 
 		switch {
 		case triggers[pull.Number].commentID != 0:
 			tr = triggers[pull.Number]
+			ps.PendingComment = tr.commentID
+		case ps.PendingComment != 0:
+			tr = trigger{reason: "comment", commentID: ps.PendingComment, at: pull.UpdatedAt}
 		case pull.HasLabel(p.cfg.Label) && ps.LabelSHA != pull.Head.SHA:
 			tr = trigger{reason: "label", at: pull.UpdatedAt}
 			ps.LabelSHA = pull.Head.SHA
@@ -244,6 +247,7 @@ func (p *Poller) runJob(ctx context.Context, j job) {
 			log.Warn("could not remove label; the app may need Issues write permission", "pr", pull.Number, "err", err)
 		}
 	}
+	ps.PendingComment = 0
 	if err != nil {
 		ps.FailedSHA = pull.Head.SHA
 		plog.Error("review failed; it will run again on a new commit, comment or label", "err", err)

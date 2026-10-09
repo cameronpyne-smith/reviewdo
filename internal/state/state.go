@@ -19,12 +19,13 @@ type Repo struct {
 }
 
 type Pull struct {
-	HeadSHA     string    `json:"head_sha"`
-	ReviewedSHA string    `json:"reviewed_sha,omitempty"`
-	ReviewedAt  time.Time `json:"reviewed_at,omitempty"`
-	LabelSHA    string    `json:"label_sha,omitempty"`
-	FailedSHA   string    `json:"failed_sha,omitempty"`
-	Baselined   bool      `json:"baselined,omitempty"`
+	HeadSHA        string    `json:"head_sha"`
+	ReviewedSHA    string    `json:"reviewed_sha,omitempty"`
+	ReviewedAt     time.Time `json:"reviewed_at,omitempty"`
+	LabelSHA       string    `json:"label_sha,omitempty"`
+	FailedSHA      string    `json:"failed_sha,omitempty"`
+	PendingComment int64     `json:"pending_comment,omitempty"`
+	Baselined      bool      `json:"baselined,omitempty"`
 }
 
 func Load(path string) (*State, bool, error) {
