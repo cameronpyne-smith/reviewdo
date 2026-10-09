@@ -40,7 +40,10 @@ reads anything else by line range, so a few large files cannot fill the
 context window. Without `clone_dir`, reviews use the diff alone.
 
 Large pull requests are reviewed in parts of related files, each with full
-tool access, then merged. A triage pass drops findings that say nothing
+tool access, then merged. When the repository has instruction files, a
+separate pass with no tools checks every added line against them and
+reports each breach with the rule quoted; a quote that does not appear in
+the instructions is discarded. A triage pass drops findings that say nothing
 concrete: reassurance, requests to "please verify", generic advice. Every
 remaining finding is re-checked by a separate, sceptical verification pass
 against the files before it is posted, highest severity first; rejected

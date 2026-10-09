@@ -542,6 +542,23 @@ func (p *Poller) ReviewAt(ctx context.Context, repoCfg config.Repo, pull *github
 	var rejected []review.Comment
 	adjusted := false
 
+	if repo != nil && time.Now().Before(hard.Add(-reserve/2)) {
+		docs := repoInstructions
+		if strings.TrimSpace(repoCfg.Instructions) != "" {
+			docs = append([]review.Instruction{{Source: "review guidance for this repository", Text: repoCfg.Instructions}}, docs...)
+		}
+		violations, st, err := review.Rules(ctx, p.llm, docs, promptFiles, p.cfg.Review.Ignore)
+		total.Merge(st)
+		if err != nil {
+			log.Warn("rule check failed", "err", err)
+		}
+		var added int
+		res.Comments, added = review.AddViolations(res.Comments, violations)
+		if len(docs) > 0 {
+			log.Info("rule check", "documents", len(docs), "violations", len(violations), "added", added, "took", st.Duration.Round(time.Second))
+		}
+	}
+
 	if len(res.Comments) > 0 {
 		var reader review.Repo
 		if repo != nil {

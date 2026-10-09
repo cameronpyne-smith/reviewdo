@@ -23,7 +23,7 @@ Drop a finding when it:
 
 A kept finding's body must speak to the author about the code. If it narrates what the reviewer did ("I searched", "I could not find", "the tools show"), keep the finding but set "body" to the same finding with that narration removed; otherwise omit "body".
 
-Keep every finding that names a concrete problem at a concrete place, including the same issue reported at several places, and including anything you are unsure about. Keep is the default.
+Keep every finding that names a concrete problem at a concrete place, including the same issue reported at several places, and including anything you are unsure about. Keep is the default. A finding that quotes a rule from the repository's own instructions ("The repository's ... says:") is kept whenever the quoted rule applies to the line, even where a linter could have caught it: the repository chose to write the rule down.
 
 For each kept finding also set its severity from these definitions, ignoring the draft's own: critical means it will certainly break, lose data or open a security hole; major means a likely bug, or a clear mismatch between what the change says and what it does, or a stale statement that will mislead whoever relies on it; minor means worth fixing but not blocking; nit means optional. When unsure between two, choose the lower.
 
