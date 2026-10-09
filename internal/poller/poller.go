@@ -234,6 +234,18 @@ func (p *Poller) scanRepo(ctx context.Context, repo config.Repo) ([]job, error) 
 func (p *Poller) runJob(ctx context.Context, j job) {
 	pull, ps := j.pull, j.ps
 	log := p.log.With("repo", j.repo.Name)
+	if fresh, err := p.gh.Pull(ctx, j.repo.Name, pull.Number); err != nil {
+		log.Warn("could not refresh pull request; reviewing it as queued", "pr", pull.Number, "err", err)
+	} else if fresh.State != "open" {
+		log.Info("pull request closed since it was queued; skipping", "pr", pull.Number)
+		ps.PendingComment = 0
+		return
+	} else {
+		if fresh.Head.SHA != pull.Head.SHA {
+			log.Info("head moved since it was queued", "pr", pull.Number, "from", short(pull.Head.SHA), "to", short(fresh.Head.SHA))
+		}
+		pull = *fresh
+	}
 	plog := log.With("pr", pull.Number, "reason", j.tr.reason, "head", short(pull.Head.SHA))
 	plog.Info("reviewing")
 	start := time.Now()
@@ -310,7 +322,11 @@ func (p *Poller) Review(ctx context.Context, repoCfg config.Repo, pull *github.P
 	ctx, cancel := context.WithTimeout(ctx, p.cfg.Review.Timeout.Duration)
 	defer cancel()
 	log := p.log.With("pr", pull.Number)
-	oc, err := p.ReviewAt(ctx, repoCfg, pull, pull.Head.SHA, pull.Base.Ref, previousSHA, log)
+	base := pull.Base.SHA
+	if base == "" {
+		base = pull.Base.Ref
+	}
+	oc, err := p.ReviewAt(ctx, repoCfg, pull, pull.Head.SHA, base, previousSHA, log)
 	if err != nil {
 		return err
 	}

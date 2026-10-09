@@ -26,7 +26,10 @@ each configured repository it:
    of what changed.
 
 With `clone_dir` set, each configured repository is cloned there on first
-use and the PR head is fetched before every review. `reviewdo clone` clones
+use. Before each review the PR is re-read from GitHub, so a head or base
+that moved while it was queued is picked up and a PR closed in the meantime
+is skipped, and its head and base commits are fetched by SHA, so a base
+branch deleted after a stacked merge still works. `reviewdo clone` clones
 them all up front so no first review waits on a clone. The model reads files
 with `git show <sha>:<path>`, so nothing is ever checked out and the working
 tree can be used normally. Without `clone_dir`, reviews use the diff alone.
