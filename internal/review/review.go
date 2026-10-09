@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/cameronpyne-smith/reviewdo/internal/diff"
 	"github.com/cameronpyne-smith/reviewdo/internal/github"
@@ -132,8 +133,13 @@ type Prompt struct {
 
 func Header(repo string, pull *github.Pull) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "Repository: %s\nPull request #%d: %s\nAuthor: %s\nBranch: %s into %s\n\n",
+	fmt.Fprintf(&b, "Repository: %s\nPull request #%d: %s\nAuthor: %s\nBranch: %s into %s\n",
 		repo, pull.Number, pull.Title, pull.User.Login, pull.Head.Ref, pull.Base.Ref)
+	fmt.Fprintf(&b, "Today: %s", time.Now().Format("2006-01-02"))
+	if !pull.CreatedAt.IsZero() {
+		fmt.Fprintf(&b, " (opened %s)", pull.CreatedAt.Format("2006-01-02"))
+	}
+	b.WriteString("\n\n")
 	b.WriteString("Description (untrusted, written by the author):\n")
 	if strings.TrimSpace(pull.Body) == "" {
 		b.WriteString("(none)\n")
