@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -146,17 +147,22 @@ func (p *Poller) pollRepo(ctx context.Context, repo config.Repo) error {
 
 		if tr.reason == "label" {
 			ps.LabelSHA = pull.Head.SHA
-			if !p.DryRun {
-				if err := p.gh.RemoveLabel(ctx, repo.Name, pull.Number, p.cfg.Label); err != nil {
-					log.Warn("could not remove label; the app may need Issues write permission", "pr", pull.Number, "err", err)
-				}
-			}
 		}
 
 		plog := log.With("pr", pull.Number, "reason", tr.reason, "head", short(pull.Head.SHA))
 		plog.Info("reviewing")
 		start := time.Now()
-		if err := p.Review(ctx, repo, &pull, ps.ReviewedSHA); err != nil {
+		err := p.Review(ctx, repo, &pull, ps.ReviewedSHA)
+		if ctx.Err() != nil {
+			plog.Info("review interrupted by shutdown; it will run again on the next start", "took", time.Since(start).Round(time.Second))
+			return ctx.Err()
+		}
+		if tr.reason == "label" && !p.DryRun {
+			if err := p.gh.RemoveLabel(ctx, repo.Name, pull.Number, p.cfg.Label); err != nil {
+				log.Warn("could not remove label; the app may need Issues write permission", "pr", pull.Number, "err", err)
+			}
+		}
+		if err != nil {
 			plog.Error("review failed", "err", err)
 			continue
 		}
@@ -262,6 +268,33 @@ func (p *Poller) Review(ctx context.Context, repoCfg config.Repo, pull *github.P
 	return nil
 }
 
+func mustRead(group []*diff.File, ignore []string, max int) []string {
+	type sized struct {
+		path  string
+		lines int
+	}
+	var files []sized
+	for _, f := range group {
+		if f.Added || f.Deleted || f.Binary || diff.Ignored(f.Path, ignore) {
+			continue
+		}
+		n := 0
+		for _, h := range f.Hunks {
+			n += len(h.Lines)
+		}
+		files = append(files, sized{f.Path, n})
+	}
+	sort.SliceStable(files, func(i, j int) bool { return files[i].lines > files[j].lines })
+	var out []string
+	for i, f := range files {
+		if i >= max {
+			break
+		}
+		out = append(out, f.path)
+	}
+	return out
+}
+
 func (p *Poller) ReviewAt(ctx context.Context, repoCfg config.Repo, pull *github.Pull, head, base, previousSHA string, log *slog.Logger) (*Outcome, error) {
 	var fullDiff []byte
 	var err error
@@ -321,8 +354,21 @@ func (p *Poller) ReviewAt(ctx context.Context, repoCfg config.Repo, pull *github
 	budget := p.cfg.Review.TimeBudget.Duration
 	reserve := budget * 2 / 5
 	perPart := (budget - reserve) / time.Duration(len(groups))
+	hard := start.Add(p.cfg.Review.Timeout.Duration)
+	if d, ok := ctx.Deadline(); ok && d.Before(hard) {
+		hard = d
+	}
 	for i, group := range groups {
-		lim.Deadline = start.Add(perPart*time.Duration(i+1) - 20*time.Second)
+		partStart := time.Now()
+		lim.Deadline = start.Add(perPart * time.Duration(i+1))
+		if floor := partStart.Add(p.cfg.Review.PartTime.Duration); floor.After(lim.Deadline) {
+			lim.Deadline = floor
+		}
+		if last := hard.Add(-reserve); lim.Deadline.After(last) {
+			lim.Deadline = last
+		}
+		lim.Deadline = lim.Deadline.Add(-20 * time.Second)
+		lim.MustRead = mustRead(group, p.cfg.Review.Ignore, 10)
 		prompt := review.BuildPrompt(review.Input{
 			Repo:     repoCfg.Name,
 			Pull:     pull,
@@ -370,7 +416,14 @@ func (p *Poller) ReviewAt(ctx context.Context, repoCfg config.Repo, pull *github
 		var kept []review.Comment
 		rejected = nil
 		unverified := 0
-		verifyDeadline := start.Add(budget - 20*time.Second)
+		verifyDeadline := start.Add(budget)
+		if floor := time.Now().Add(reserve); floor.After(verifyDeadline) {
+			verifyDeadline = floor
+		}
+		if verifyDeadline.After(hard) {
+			verifyDeadline = hard
+		}
+		verifyDeadline = verifyDeadline.Add(-20 * time.Second)
 		for _, c := range res.Comments {
 			if c.Severity != "critical" && c.Severity != "major" {
 				kept = append(kept, c)

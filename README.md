@@ -141,9 +141,10 @@ See `deploy/config.example.json`. Fields:
 | `review.max_diff_bytes` | `3 × num_ctx` | diff budget; remaining files are listed by name |
 | `review.max_comments` | `15` | inline comments per review, highest severity first |
 | `review.part_bytes` | `40000` | diff bytes per review part; larger PRs are split into parts |
+| `review.part_time` | `2m` | minimum time for each part, so a large PR is read properly even when it overruns the budget |
 | `review.verify` | `true` | verify Critical and Major findings with a second pass before posting |
 | `review.time_budget` | `5m` | target duration for one review; parts and verification are cut short to fit |
 | `review.timeout` | `3 × time_budget` | hard deadline, after which the review is abandoned |
 | `review.max_output_tokens` | `48000` | total output tokens per review before the final answer is forced |
-| `review.max_tool_calls` | `60` | file reads, listings and searches the model may make per review |
+| `review.max_tool_calls` | `200` | file reads, listings and searches the model may make per review |
 | `review.ignore` | lockfiles, vendor, minified, generated | glob on basename or path, `dir/` for prefixes |

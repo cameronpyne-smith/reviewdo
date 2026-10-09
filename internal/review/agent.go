@@ -27,7 +27,12 @@ You have read-only access to the full repository at the pull request's head comm
 - search(pattern, path): extended-regex grep across the repository, optionally limited to a path
 - search_base(pattern, path): the same grep on the base branch, which is already merged and running; a construct found there is known to work
 
-A review based on the diff alone is incomplete. Before submitting, open the files this change depends on: the base or parent configuration a change builds on, files the diff references by name, callers of a changed function, and the equivalent file in a sibling environment when one exists. Use what you find to confirm or drop each concern; do not raise a concern that a quick read could have settled, and do not read more than you need. When you have finished, call submit_review exactly once with your final review. Never write the review as plain text.`
+A review based on the diff alone is incomplete: the diff shows a few lines of each change and none of what they depend on. Work like this:
+1. Read the diff and write down, for yourself, the questions it raises: what calls this, what defines that, where else is this name used, does this path exist, what does the sibling file say.
+2. Open every modified file in full with read_file so you see each change in its real context. New files are already shown whole in the diff. You may make several tool calls in one turn; do so.
+3. Answer each question with search and read_file: callers of a changed function, the base or parent configuration a change builds on, files the diff references by name, every path or link it mentions, and the equivalent file in a sibling environment when one exists. If a search finds nothing, retry once with a simpler pattern, and use list_dir rather than guessing paths.
+4. Raise only what you confirmed or could not settle after looking; drop a concern that a read settled. Do not read more than the questions need.
+When you have finished, call submit_review exactly once with your final review. Never write the review as plain text.`
 
 const VerifyPrompt = `You are checking one finding from an automated code review before it is posted. You have read-only access to the repository at the pull request's head commit through read_file, list_dir and search, and to the base branch through search_base. The base branch is merged and running, so anything found there is known to work.
 
@@ -79,11 +84,24 @@ type Limits struct {
 	MaxToolCalls int
 	MaxOutput    int
 	Deadline     time.Time
+	MustRead     []string
+}
+
+func unread(must []string, read map[string]bool) []string {
+	var out []string
+	for _, p := range must {
+		if !read[p] {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 func runLoop(ctx context.Context, llm *ollama.Client, repo Repo, messages []ollama.Message, tools []ollama.Tool, final string, finalSchema json.RawMessage, validate func(json.RawMessage) error, lim Limits, log *slog.Logger) (json.RawMessage, Stats, error) {
 	var st Stats
 	nudges := 0
+	readNudges := 0
+	read := map[string]bool{}
 	for st.Rounds = 1; st.Rounds <= lim.MaxToolCalls+5; st.Rounds++ {
 		msg, u, err := llm.Chat(ctx, messages, tools, nil)
 		if err != nil {
@@ -101,9 +119,16 @@ func runLoop(ctx context.Context, llm *ollama.Client, repo Repo, messages []olla
 			log.Info("time budget exhausted, forcing the final answer", "rounds", st.Rounds, "tool_calls", st.ToolCalls)
 			return finalise(ctx, llm, messages, final, finalSchema, &st)
 		}
-		mustRead := final == "submit_review" && st.ToolCalls == 0 && nudges == 0
+		var missing []string
+		if final == "submit_review" && readNudges < 2 {
+			if len(lim.MustRead) > 0 {
+				missing = unread(lim.MustRead, read)
+			} else if st.ToolCalls == 0 {
+				missing = []string{"the files this change depends on"}
+			}
+		}
 		if len(msg.ToolCalls) == 0 {
-			if looksLikeJSON(msg.Content) && !mustRead {
+			if looksLikeJSON(msg.Content) && len(missing) == 0 {
 				return json.RawMessage(extractJSON(msg.Content)), st, nil
 			}
 			nudges++
@@ -113,18 +138,20 @@ func runLoop(ctx context.Context, llm *ollama.Client, repo Repo, messages []olla
 			text := fmt.Sprintf("Call %s now with your final answer.", final)
 			if u.Truncated && msg.Content == "" {
 				text = fmt.Sprintf("Your reasoning was cut off. Decide now with what you have: call a tool or %s, without further deliberation.", final)
-			} else if mustRead {
-				text = "You have not read anything from the repository. Use the tools to open the files this change depends on and check the consistency points, then call submit_review."
+			} else if len(missing) > 0 {
+				readNudges++
+				text = "You have not yet read " + strings.Join(missing, ", ") + ". Open them with read_file, check the consistency points, then call submit_review."
 			}
 			messages = append(messages, ollama.Message{Role: "user", Content: text})
 			continue
 		}
+		exhausted := false
 		for _, call := range msg.ToolCalls {
 			name := call.Function.Name
 			if name == final {
-				if mustRead {
-					nudges++
-					messages = append(messages, ollama.Message{Role: "tool", ToolName: name, ToolCallID: call.ID, Content: "rejected: you have not read anything from the repository yet. Open the files this change depends on and check the consistency points first, then call submit_review again."})
+				if len(missing) > 0 {
+					readNudges++
+					messages = append(messages, ollama.Message{Role: "tool", ToolName: name, ToolCallID: call.ID, Content: "rejected: you have not yet read " + strings.Join(missing, ", ") + ". Open them with read_file, check the consistency points, then call submit_review again."})
 					continue
 				}
 				if err := validate(call.Function.Arguments); err != nil {
@@ -138,14 +165,24 @@ func runLoop(ctx context.Context, llm *ollama.Client, repo Repo, messages []olla
 			st.ToolCalls++
 			var content string
 			if st.ToolCalls > lim.MaxToolCalls {
-				content = fmt.Sprintf("tool budget exhausted; call %s now with what you know", final)
+				exhausted = true
+				content = "tool budget exhausted"
 			} else {
 				var args map[string]any
 				_ = json.Unmarshal(call.Function.Arguments, &args)
 				content = runTool(ctx, repo, name, args)
+				if name == "read_file" {
+					if path, _ := args["path"].(string); path != "" {
+						read[path] = true
+					}
+				}
 				log.Debug("tool", "name", name, "args", args, "bytes", len(content))
 			}
 			messages = append(messages, ollama.Message{Role: "tool", ToolName: name, ToolCallID: call.ID, Content: content})
+		}
+		if exhausted {
+			log.Info("tool budget exhausted, forcing the final answer", "rounds", st.Rounds, "tool_calls", st.ToolCalls)
+			return finalise(ctx, llm, messages, final, finalSchema, &st)
 		}
 	}
 	return finalise(ctx, llm, messages, final, finalSchema, &st)

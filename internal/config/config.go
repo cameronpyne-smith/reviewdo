@@ -62,6 +62,7 @@ type Review struct {
 	MaxToolCalls int      `json:"max_tool_calls"`
 	MaxOutput    int      `json:"max_output_tokens"`
 	PartBytes    int      `json:"part_bytes"`
+	PartTime     Duration `json:"part_time"`
 	Verify       *bool    `json:"verify"`
 	TimeBudget   Duration `json:"time_budget"`
 	Timeout      Duration `json:"timeout"`
@@ -127,13 +128,16 @@ func (c *Config) applyDefaults() error {
 		c.Review.MaxComments = 15
 	}
 	if c.Review.MaxToolCalls == 0 {
-		c.Review.MaxToolCalls = 60
+		c.Review.MaxToolCalls = 200
 	}
 	if c.Review.MaxOutput == 0 {
 		c.Review.MaxOutput = 48000
 	}
 	if c.Review.PartBytes == 0 {
 		c.Review.PartBytes = 40000
+	}
+	if c.Review.PartTime.Duration == 0 {
+		c.Review.PartTime.Duration = 2 * time.Minute
 	}
 	if c.Review.Verify == nil {
 		v := true

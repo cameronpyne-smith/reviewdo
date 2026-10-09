@@ -20,6 +20,6 @@
   },
   "review": {
     "max_comments": 15,
-    "max_tool_calls": 60
+    "max_tool_calls": 200
   }
 }
