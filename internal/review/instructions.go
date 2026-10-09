@@ -17,16 +17,19 @@ type Instruction struct {
 	Text   string
 }
 
-const maxInstructionBytes = 48 << 10
+const (
+	maxInstructionBytes = 48 << 10
+	maxInstructionTotal = 64 << 10
+)
 
 func RepoInstructions(ctx context.Context, repo RefReader, ref string, changed []string) []Instruction {
 	var out []Instruction
 	if text, err := repo.ReadFileAt(ctx, ref, ".github/copilot-instructions.md"); err == nil {
-		out = append(out, Instruction{Source: ".github/copilot-instructions.md", Text: clip(text)})
+		out = append(out, Instruction{Source: ".github/copilot-instructions.md", Text: strings.TrimSpace(text)})
 	}
 	listing, err := repo.ListDirAt(ctx, ref, ".github/instructions")
 	if err != nil {
-		return out
+		return budget(out)
 	}
 	for _, name := range strings.Split(strings.TrimSpace(listing), "\n") {
 		if !strings.HasSuffix(name, ".instructions.md") {
@@ -41,15 +44,31 @@ func RepoInstructions(ctx context.Context, repo RefReader, ref string, changed [
 		if applyTo != "" && !anyMatch(applyTo, changed) {
 			continue
 		}
-		out = append(out, Instruction{Source: p, Text: clip(body)})
+		out = append(out, Instruction{Source: p, Text: strings.TrimSpace(body)})
+	}
+	return budget(out)
+}
+
+func budget(docs []Instruction) []Instruction {
+	left := maxInstructionTotal
+	var out []Instruction
+	for _, d := range docs {
+		if left <= 0 {
+			break
+		}
+		d.Text = clip(d.Text, min(maxInstructionBytes, left))
+		left -= len(d.Text)
+		out = append(out, d)
 	}
 	return out
 }
 
-func clip(s string) string {
-	s = strings.TrimSpace(s)
-	if len(s) > maxInstructionBytes {
-		return s[:maxInstructionBytes] + "\n[truncated]"
+func clip(s string, limit int) string {
+	if len(s) > limit {
+		if cut := strings.LastIndexByte(s[:limit], '\n'); cut > limit/2 {
+			limit = cut
+		}
+		return s[:limit] + "\n[truncated: the rest of this file is applied by the convention check]"
 	}
 	return s
 }

@@ -179,7 +179,11 @@ func runLoop(ctx context.Context, llm *ollama.Client, repo Repo, messages []olla
 			return nil, st, err
 		}
 		st.Usage.Add(u)
+		if u.Truncated && msg.Content == "" && len(msg.ToolCalls) == 0 {
+			msg.Thinking = ""
+		}
 		messages = append(messages, msg)
+		trimThinking(messages)
 		used := max(u.PromptTokens, approxTokens(messages))
 		log.Debug("round", "n", st.Rounds, "context", used, "output_tokens", u.OutputTokens, "truncated", u.Truncated, "tool_calls", len(msg.ToolCalls))
 		if lim.MaxContext > 0 && used > lim.MaxContext {

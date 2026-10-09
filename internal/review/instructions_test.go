@@ -2,6 +2,7 @@ package review
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -48,5 +49,27 @@ func TestResultLenientFiles(t *testing.T) {
 	}
 	if err := json.Unmarshal([]byte(`{"verdict":"ready","summary":"ok","comments":"nope"}`), &r); err == nil {
 		t.Errorf("bad comments should fail")
+	}
+}
+
+func TestBudgetCapsTotalInstructionBytes(t *testing.T) {
+	big := strings.Repeat("rule\n", 12000)
+	docs := budget([]Instruction{{Source: "a", Text: big}, {Source: "b", Text: big}, {Source: "c", Text: "short"}})
+	total := 0
+	for _, d := range docs {
+		total += len(d.Text)
+	}
+	if total > maxInstructionTotal+200 {
+		t.Errorf("total %d over budget", total)
+	}
+	if len(docs[0].Text) < maxInstructionBytes-100 || !strings.Contains(docs[1].Text, "[truncated") {
+		t.Errorf("unexpected clipping: %d, %d", len(docs[0].Text), len(docs[1].Text))
+	}
+	if len(docs) != 2 {
+		t.Errorf("doc beyond the budget should be dropped, got %d docs", len(docs))
+	}
+	docs = budget([]Instruction{{Source: "a", Text: "short"}, {Source: "b", Text: big}, {Source: "c", Text: "tail"}})
+	if len(docs) != 3 || docs[0].Text != "short" || docs[2].Text != "tail" {
+		t.Errorf("small docs changed: %+v", docs)
 	}
 }
