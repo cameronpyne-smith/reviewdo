@@ -42,9 +42,11 @@ automatically. Use a comment or the label to review them.
 
 - Outbound HTTPS to `api.github.com` and `github.com` (git fetch) and HTTP to
   `127.0.0.1:11434` only. Nothing listens.
-- The model's tools are `read_file`, `list_dir`, `search` and `search_base`,
-  all served by `git show`, `git ls-tree` and `git grep` at the PR head
-  commit or the base branch. Nothing from the repository is ever executed:
+- The model's tools are `read_file`, `list_dir`, `search`, `search_base`,
+  `definition`, `references` and `outline`, all served by `git show`,
+  `git ls-tree` and `git grep` at the PR head commit or the base branch.
+  The symbol tools are pattern matches, not a language server, so no
+  build, restore or analysis of repository code ever runs. Nothing from the repository is ever executed:
   no hooks, no builds, no tests, no submodules.
 - Git runs with system and global config disabled and no credential helper.
   The installation token is passed per command through the environment and is

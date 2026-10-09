@@ -17,6 +17,9 @@ type Repo interface {
 	ListDir(ctx context.Context, path string) (string, error)
 	Search(ctx context.Context, pattern, path string) (string, error)
 	SearchBase(ctx context.Context, pattern, path string) (string, error)
+	Definition(ctx context.Context, name, path string) (string, error)
+	References(ctx context.Context, name, path string) (string, error)
+	Outline(ctx context.Context, path string) (string, error)
 }
 
 const ToolPrompt = `
@@ -26,15 +29,18 @@ You have read-only access to the full repository at the pull request's head comm
 - list_dir(path): entries in a directory ("" for the root)
 - search(pattern, path): extended-regex grep across the repository, optionally limited to a path
 - search_base(pattern, path): the same grep on the base branch, which is already merged and running; a construct found there is known to work
+- definition(name, path): where a class, function, method, type, variable or resource with that exact name is declared, with the lines that follow
+- references(name, path): every use of that exact name, grouped by file with counts
+- outline(path): the declarations in one file with their line numbers, to orient in a large file before reading the part you need
 
 A review based on the diff alone is incomplete: the diff shows a few lines of each change and none of what they depend on. Work like this:
 1. Read the diff and write down, for yourself, the questions it raises: what calls this, what defines that, where else is this name used, does this path exist, what does the sibling file say.
 2. Open every modified file in full with read_file so you see each change in its real context. New files are already shown whole in the diff. You may make several tool calls in one turn; do so.
-3. Answer each question with search and read_file: callers of a changed function, the base or parent configuration a change builds on, files the diff references by name, every path or link it mentions, and the equivalent file in a sibling environment when one exists. If a search finds nothing, retry once with a simpler pattern, and use list_dir rather than guessing paths.
+3. Answer each question with the tools: definition for what a changed line calls or extends, references for callers and other users of a changed function, setting or name, the base or parent configuration a change builds on, files the diff references by name, every path or link it mentions, and the equivalent file in a sibling environment when one exists. If a search finds nothing, retry once with a simpler pattern, and use list_dir rather than guessing paths.
 4. Raise only what you confirmed or could not settle after looking; drop a concern that a read settled. Do not read more than the questions need.
 When you have finished, call submit_review exactly once with your final review. Never write the review as plain text.`
 
-const VerifyPrompt = `You are checking one finding from an automated code review before it is posted. You have read-only access to the repository at the pull request's head commit through read_file, list_dir and search, and to the base branch through search_base. The base branch is merged and running, so anything found there is known to work.
+const VerifyPrompt = `You are checking one finding from an automated code review before it is posted. You have read-only access to the repository at the pull request's head commit through read_file, list_dir, search, definition, references and outline, and to the base branch through search_base. The base branch is merged and running, so anything found there is known to work.
 
 Re-read the lines the finding points at and whatever else is needed to decide whether it is true. Be sceptical. A finding is rejected if it misreads the code, describes something that is already handled, or is speculative. If the finding claims a syntax error, an invalid or unsupported argument, option, field, metric or API, or that something does not exist, you must call search_base for the same construct before deciding: the reviewer's knowledge of languages and external tools may be out of date, and if the base branch uses the construct, the finding is wrong and must be rejected. If the base branch does not use it and you cannot prove the claim from the repository, reject it unless it concerns an external fact the repository cannot settle, in which case downgrade it to minor with a body that says exactly what would be wrong and what it would cause, never a request to verify. A finding that rests on how a library, client or broker behaves (what a method throws, which interface a type implements, what happens on failure) is confirmed only if the repository shows that behaviour in a test, a comment or other code handling the same case; the reviewer's memory of a library is not evidence, and neither is yours. Otherwise reject it. A finding is downgraded if the problem is real but less severe than stated or needs rewording to be accurate. A finding is confirmed only if you have checked it against the files and it holds as written.
 
@@ -49,10 +55,16 @@ var reviewTools = []ollama.Tool{
 		`{"type":"object","properties":{"pattern":{"type":"string"},"path":{"type":"string","description":"optional directory or file to limit the search to"}},"required":["pattern"]}`),
 	fn("search_base", "Search file contents on the base branch, which is already merged and running, with an extended regular expression. Use it to check whether a construct is already in working use.",
 		`{"type":"object","properties":{"pattern":{"type":"string"},"path":{"type":"string","description":"optional directory or file to limit the search to"}},"required":["pattern"]}`),
+	fn("definition", "Find where a class, function, method, type, variable or resource with this exact name is declared, with the following lines.",
+		`{"type":"object","properties":{"name":{"type":"string","description":"a single identifier"},"path":{"type":"string","description":"optional directory or file to limit the search to"}},"required":["name"]}`),
+	fn("references", "List every use of this exact name in the repository, grouped by file with counts.",
+		`{"type":"object","properties":{"name":{"type":"string","description":"a single identifier"},"path":{"type":"string","description":"optional directory or file to limit the search to"}},"required":["name"]}`),
+	fn("outline", "List the declarations in one file with their line numbers.",
+		`{"type":"object","properties":{"path":{"type":"string","description":"path relative to the repository root"}},"required":["path"]}`),
 	fn("submit_review", "Submit the final review. Call exactly once when done.", string(Schema)),
 }
 
-var verifyTools = append(append([]ollama.Tool{}, reviewTools[:4]...),
+var verifyTools = append(append([]ollama.Tool{}, reviewTools[:len(reviewTools)-1]...),
 	fn("submit_verdict", "Submit the verdict on the finding. Call exactly once when done.", `{
   "type": "object",
   "properties": {
@@ -244,6 +256,12 @@ func runTool(ctx context.Context, repo Repo, name string, args map[string]any) s
 		out, err = repo.Search(ctx, str("pattern"), str("path"))
 	case "search_base":
 		out, err = repo.SearchBase(ctx, str("pattern"), str("path"))
+	case "definition":
+		out, err = repo.Definition(ctx, str("name"), str("path"))
+	case "references":
+		out, err = repo.References(ctx, str("name"), str("path"))
+	case "outline":
+		out, err = repo.Outline(ctx, str("path"))
 	default:
 		err = errors.New("unknown tool " + name)
 	}

@@ -21,6 +21,9 @@ func (f fakeRepo) ReadFile(_ context.Context, p string) (string, error) {
 func (f fakeRepo) ListDir(context.Context, string) (string, error)            { return "", nil }
 func (f fakeRepo) Search(context.Context, string, string) (string, error)     { return "", nil }
 func (f fakeRepo) SearchBase(context.Context, string, string) (string, error) { return "", nil }
+func (f fakeRepo) Definition(context.Context, string, string) (string, error) { return "", nil }
+func (f fakeRepo) References(context.Context, string, string) (string, error) { return "", nil }
+func (f fakeRepo) Outline(context.Context, string) (string, error)            { return "", nil }
 
 func TestAnchor(t *testing.T) {
 	files := []*diff.File{{Path: "a.yaml", Hunks: []diff.Hunk{{Lines: []diff.Line{
