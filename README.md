@@ -56,8 +56,11 @@ automatically. Use a comment or the label to review them.
   (`deploy/reviewdo.service`).
 - PR content is untrusted. The model only produces JSON that becomes review
   text; its tools are read-only and it executes nothing.
-- Review requests via comment are honoured only from `OWNER`, `MEMBER` or
-  `COLLABORATOR` accounts.
+- Review requests via comment are honoured from anyone who can comment on a
+  private repository, since access there already implies membership, and
+  only from `OWNER`, `MEMBER` or `COLLABORATOR` accounts on a public one.
+  The app cannot see organisation membership, so members of a private
+  organisation appear as `CONTRIBUTOR`.
 
 ## Install
 

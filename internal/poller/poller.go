@@ -34,6 +34,7 @@ type Poller struct {
 	mention  *regexp.Regexp
 	log      *slog.Logger
 	repos    []config.Repo
+	private  map[string]bool
 	DryRun   bool
 }
 
@@ -73,19 +74,25 @@ func (p *Poller) Run(ctx context.Context) error {
 }
 
 func (p *Poller) resolveRepos(ctx context.Context) []config.Repo {
-	if !p.cfg.HasWildcard() {
-		return p.cfg.Repos
-	}
 	all, err := p.gh.InstallationRepositories(ctx)
 	if err != nil {
 		p.log.Error("list installation repositories failed, using the last known list", "known", len(p.repos), "err", err)
+		if !p.cfg.HasWildcard() {
+			return p.cfg.Repos
+		}
 		return p.repos
 	}
+	private := map[string]bool{}
 	var names []string
 	for _, r := range all {
+		private[strings.ToLower(r.FullName)] = r.Private
 		if !r.Archived {
 			names = append(names, r.FullName)
 		}
+	}
+	p.private = private
+	if !p.cfg.HasWildcard() {
+		return p.cfg.Repos
 	}
 	repos := p.cfg.Resolve(names)
 	if len(repos) != len(p.repos) {
@@ -221,8 +228,8 @@ func (p *Poller) commentTriggers(ctx context.Context, repo string, rs *state.Rep
 		if _, ok := open[n]; !ok {
 			continue
 		}
-		if !trustedAssociations[c.AuthorAssociation] {
-			p.log.Warn("ignoring review request from untrusted commenter", "repo", repo, "pr", n, "user", c.User.Login, "association", c.AuthorAssociation)
+		if !trustedAssociations[c.AuthorAssociation] && !p.private[strings.ToLower(repo)] {
+			p.log.Warn("ignoring review request from untrusted commenter on a public repository", "repo", repo, "pr", n, "user", c.User.Login, "association", c.AuthorAssociation)
 			continue
 		}
 		out[n] = trigger{reason: "comment", commentID: c.ID}
