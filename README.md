@@ -34,7 +34,10 @@ is skipped, and its head and base commits are fetched by SHA, so a base
 branch deleted after a stacked merge still works. `reviewdo clone` clones
 them all up front so no first review waits on a clone. The model reads files
 with `git show <sha>:<path>`, so nothing is ever checked out and the working
-tree can be used normally. Without `clone_dir`, reviews use the diff alone.
+tree can be used normally. A file over 24 KB is not returned whole: the model
+gets its outline and the regions the PR changes with surrounding lines, and
+reads anything else by line range, so a few large files cannot fill the
+context window. Without `clone_dir`, reviews use the diff alone.
 
 Large pull requests are reviewed in parts of related files, each with full
 tool access, then merged. A triage pass drops findings that say nothing

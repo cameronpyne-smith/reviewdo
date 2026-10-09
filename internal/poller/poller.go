@@ -496,6 +496,7 @@ func (p *Poller) ReviewAt(ctx context.Context, repoCfg config.Repo, pull *github
 		}
 		lim.Deadline = lim.Deadline.Add(-20 * time.Second)
 		lim.MustRead = mustRead(group, p.cfg.Review.Ignore, 6)
+		lim.Changed = review.ChangedSpans(group)
 		var symbols string
 		if repo != nil {
 			symbols = review.Symbols(ctx, repo, group)
@@ -570,6 +571,7 @@ func (p *Poller) ReviewAt(ctx context.Context, repoCfg config.Repo, pull *github
 		for _, f := range files {
 			fileDiffs[f.Path] = f.Render()
 		}
+		changed := review.ChangedSpans(files)
 		var kept []review.Comment
 		unverified := 0
 		verifyDeadline := start.Add(budget)
@@ -591,7 +593,7 @@ func (p *Poller) ReviewAt(ctx context.Context, repoCfg config.Repo, pull *github
 				}
 				continue
 			}
-			v, st, err := review.VerifyFinding(ctx, p.llm, repo, header, c, fileDiffs[c.Path], review.Limits{MaxToolCalls: 12, MaxOutput: p.cfg.Review.MaxOutput / 2, MaxContext: maxContext, Deadline: verifyDeadline}, log.With("verify", c.Path))
+			v, st, err := review.VerifyFinding(ctx, p.llm, repo, header, c, fileDiffs[c.Path], review.Limits{MaxToolCalls: 12, MaxOutput: p.cfg.Review.MaxOutput / 2, MaxContext: maxContext, Deadline: verifyDeadline, Changed: changed}, log.With("verify", c.Path))
 			total.Merge(st)
 			if err != nil {
 				log.Warn("verification failed, keeping finding", "path", c.Path, "line", c.Line, "err", err)

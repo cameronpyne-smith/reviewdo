@@ -18,7 +18,7 @@ import (
 const (
 	cmdTimeout   = 2 * time.Minute
 	cloneTimeout = 15 * time.Minute
-	maxFileBytes = 64 << 10
+	maxFileBytes = 4 << 20
 	maxListLines = 500
 	maxGrepLines = 200
 	maxGrepBytes = 24 << 10
@@ -215,7 +215,7 @@ func (r *Repo) ReadFileAt(ctx context.Context, ref, p string) (string, error) {
 		return "", fmt.Errorf("%s is a binary file", cp)
 	}
 	if len(out) > maxFileBytes {
-		return string(out[:maxFileBytes]) + fmt.Sprintf("\n\n[truncated: %d of %d bytes shown]\n", maxFileBytes, len(out)), nil
+		return "", fmt.Errorf("%s is %d KB, too large to read", cp, len(out)>>10)
 	}
 	return string(out), nil
 }

@@ -26,7 +26,7 @@ type Repo interface {
 const ToolPrompt = `
 
 You have read-only access to the full repository at the pull request's head commit through these tools:
-- read_file(path, start, end): the contents of one file, or only lines start to end; on a large file call outline first and read the ranges you need
+- read_file(path, start, end): the contents of one file, or only lines start to end. A large file comes back as its outline plus the regions this pull request changes with their surrounding lines; read any other part of it by line range
 - list_dir(path): entries in a directory ("" for the root)
 - search(pattern, path): extended-regex grep across the repository, optionally limited to a path
 - search_base(pattern, path): the same grep on the base branch, which is already merged and running; a construct found there is known to work
@@ -36,7 +36,7 @@ You have read-only access to the full repository at the pull request's head comm
 
 A review based on the diff alone is incomplete: the diff shows a few lines of each change and none of what they depend on. Work like this:
 1. Read the diff and write down, for yourself, the questions it raises: what calls this, what defines that, where else is this name used, does this path exist, what does the sibling file say.
-2. Open every modified file in full with read_file so you see each change in its real context. New files are already shown whole in the diff. Issue every independent read, search and lookup in the same turn: one tool call per turn wastes most of your time budget, and the budget is what ends the review.
+2. Open every modified file with read_file so you see each change in its real context. New files are already shown whole in the diff. Do not re-read a large file whole; read the ranges the outline points you to. Issue every independent read, search and lookup in the same turn: one tool call per turn wastes most of your time budget, and the budget is what ends the review.
 3. Answer each question with the tools: definition for what a changed line calls or extends, references for callers and other users of a changed function, setting or name, the base or parent configuration a change builds on, files the diff references by name, every path or link it mentions, and the equivalent file in a sibling environment when one exists. If a search finds nothing, retry once with a simpler pattern, and use list_dir rather than guessing paths.
 4. Raise only what you confirmed or could not settle after looking; drop a concern that a read settled. Do not read more than the questions need.
 When you have finished, call submit_review exactly once with your final review. Never write the review as plain text.`
@@ -48,7 +48,7 @@ Re-read the lines the finding points at and whatever else is needed to decide wh
 Call submit_verdict exactly once with: verdict (confirmed, downgraded or rejected), severity (critical, major, minor or nit; the severity it should be posted at), body, and reason (one sentence for the log). The body is the comment the author will read. Write it to the author about the code, never as a judgement on "the finding" or "the reviewer", and never mention this check. Remove any narration of what the reviewer did, searched or could not find. When the verdict is confirmed, return the original body unchanged. When it is downgraded, rewrite the body so it states accurately what is wrong and why it matters.`
 
 var reviewTools = []ollama.Tool{
-	fn("read_file", "Read one file from the repository at the pull request head commit, optionally only a range of lines.",
+	fn("read_file", "Read one file from the repository at the pull request head commit, optionally only a range of lines. A large file is returned as its outline plus the changed regions in context; use start and end for other parts.",
 		`{"type":"object","properties":{"path":{"type":"string","description":"path relative to the repository root"},"start":{"type":"integer","description":"first line to return, 1-based; omit for the whole file"},"end":{"type":"integer","description":"last line to return"}},"required":["path"]}`),
 	fn("list_dir", "List the entries of a directory in the repository. Directories end with a slash.",
 		`{"type":"object","properties":{"path":{"type":"string","description":"directory path relative to the repository root, empty for the root"}}}`),
@@ -99,6 +99,7 @@ type Limits struct {
 	MaxContext   int
 	Deadline     time.Time
 	MustRead     []string
+	Changed      map[string][]Span
 }
 
 func approxTokens(messages []ollama.Message) int {
@@ -226,7 +227,7 @@ func runLoop(ctx context.Context, llm *ollama.Client, repo Repo, messages []olla
 			} else {
 				var args map[string]any
 				_ = json.Unmarshal(call.Function.Arguments, &args)
-				content = runTool(ctx, repo, name, args)
+				content = runTool(ctx, repo, name, args, lim.Changed)
 				if name == "read_file" {
 					if path, _ := args["path"].(string); path != "" {
 						read[path] = true
@@ -292,7 +293,7 @@ func extractJSON(raw string) string {
 	return s
 }
 
-func runTool(ctx context.Context, repo Repo, name string, args map[string]any) string {
+func runTool(ctx context.Context, repo Repo, name string, args map[string]any, changed map[string][]Span) string {
 	str := func(k string) string {
 		v, _ := args[k].(string)
 		return v
@@ -311,10 +312,7 @@ func runTool(ctx context.Context, repo Repo, name string, args map[string]any) s
 	}
 	switch name {
 	case "read_file":
-		out, err = repo.ReadFile(ctx, str("path"))
-		if err == nil {
-			out = lineRange(out, num("start"), num("end"))
-		}
+		out, err = readFile(ctx, repo, str("path"), num("start"), num("end"), changed)
 	case "list_dir":
 		out, err = repo.ListDir(ctx, str("path"))
 	case "search":
