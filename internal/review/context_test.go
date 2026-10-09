@@ -128,3 +128,18 @@ func TestChangedSpans(t *testing.T) {
 		t.Errorf("got %v want %v", got, want)
 	}
 }
+
+func TestTrimThinkingKeepsOnlyTheLastRound(t *testing.T) {
+	msgs := []ollama.Message{
+		{Role: "system", Content: "sys"},
+		{Role: "user", Content: "prompt"},
+		{Role: "assistant", Thinking: "t1", Content: "a1"},
+		{Role: "tool", Content: "r1"},
+		{Role: "assistant", Thinking: "t2", Content: "a2"},
+		{Role: "tool", Content: "r2"},
+	}
+	trimThinking(msgs)
+	if msgs[2].Thinking != "" || msgs[4].Thinking != "t2" || msgs[2].Content != "a1" {
+		t.Errorf("unexpected: %+v", msgs)
+	}
+}

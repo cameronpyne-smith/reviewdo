@@ -117,6 +117,20 @@ func approxTokens(messages []ollama.Message) int {
 	return n / 3
 }
 
+func trimThinking(messages []ollama.Message) {
+	last := -1
+	for i, m := range messages {
+		if m.Role == "assistant" {
+			last = i
+		}
+	}
+	for i := range messages {
+		if i != last && messages[i].Role == "assistant" {
+			messages[i].Thinking = ""
+		}
+	}
+}
+
 func shrink(messages []ollama.Message, budget int) []ollama.Message {
 	if len(messages) <= 2 || approxTokens(messages) <= budget {
 		return messages
@@ -155,6 +169,7 @@ func runLoop(ctx context.Context, llm *ollama.Client, repo Repo, messages []olla
 	readNudges := 0
 	read := map[string]bool{}
 	for st.Rounds = 1; st.Rounds <= lim.MaxToolCalls+5; st.Rounds++ {
+		trimThinking(messages)
 		msg, u, err := llm.Chat(ctx, messages, tools, nil)
 		if err != nil {
 			if lim.MaxContext > 0 && strings.Contains(err.Error(), "no user query found") {
