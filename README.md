@@ -152,7 +152,7 @@ See `deploy/config.example.json`. Fields:
 | `review.max_comments` | `15` | inline comments per review, highest severity first |
 | `review.part_bytes` | `40000` | diff bytes per review part; larger PRs are split into parts |
 | `review.part_time` | `2m` | minimum time for each part, so a large PR is read properly even when it overruns the budget |
-| `review.triage` | `true` | drop findings that say nothing concrete (reassurance, "please verify", generic advice) with one fast model call before verification |
+| `review.triage` | `true` | one fast model call before verification that drops findings which say nothing concrete (reassurance, "please verify", generic advice) and sets each finding's severity from fixed definitions |
 | `review.verify` | `true` | verify Critical and Major findings with a second pass before posting |
 | `review.time_budget` | `5m` | target duration for one review; parts and verification are cut short to fit |
 | `review.timeout` | `3 × time_budget` | hard deadline, after which the review is abandoned |

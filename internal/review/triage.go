@@ -20,7 +20,11 @@ Drop a finding when it:
 - is about formatting, whitespace, naming preference or anything a linter would catch;
 - is the same issue as another finding at the same place.
 
-Keep every finding that names a concrete problem at a concrete place, including the same issue reported at several places, and including anything you are unsure about. Keep is the default. Respond with JSON only: {"decisions":[{"id":"F1","keep":true,"reason":"one short sentence"}]} with one decision per finding.`
+Keep every finding that names a concrete problem at a concrete place, including the same issue reported at several places, and including anything you are unsure about. Keep is the default.
+
+For each kept finding also set its severity from these definitions, ignoring the draft's own: critical means it will certainly break, lose data or open a security hole; major means a likely bug, or a clear mismatch between what the change says and what it does, or a stale statement that will mislead whoever relies on it; minor means worth fixing but not blocking; nit means optional. When unsure between two, choose the lower.
+
+Respond with JSON only: {"decisions":[{"id":"F1","keep":true,"severity":"minor","reason":"one short sentence"}]} with one decision per finding.`
 
 var TriageSchema = json.RawMessage(`{
   "type": "object",
@@ -32,9 +36,10 @@ var TriageSchema = json.RawMessage(`{
         "properties": {
           "id": {"type": "string"},
           "keep": {"type": "boolean"},
+          "severity": {"type": "string", "enum": ["critical", "major", "minor", "nit"]},
           "reason": {"type": "string"}
         },
-        "required": ["id", "keep", "reason"]
+        "required": ["id", "keep", "severity", "reason"]
       }
     }
   },
@@ -51,6 +56,7 @@ type Triaged struct {
 	Kept    []Comment
 	Dropped []Comment
 	Reasons []string
+	Rerated int
 }
 
 func TriageInput(header string, comments []Comment) string {
@@ -84,9 +90,10 @@ func Triage(ctx context.Context, llm *ollama.Client, header string, comments []C
 	}
 	var out struct {
 		Decisions []struct {
-			ID     string `json:"id"`
-			Keep   bool   `json:"keep"`
-			Reason string `json:"reason"`
+			ID       string `json:"id"`
+			Keep     bool   `json:"keep"`
+			Severity string `json:"severity"`
+			Reason   string `json:"reason"`
 		} `json:"decisions"`
 	}
 	if err := json.Unmarshal(raw, &out); err != nil {
@@ -94,16 +101,25 @@ func Triage(ctx context.Context, llm *ollama.Client, header string, comments []C
 		return t, st, fmt.Errorf("triage output invalid: %w", err)
 	}
 	drop := map[string]string{}
+	severity := map[string]string{}
 	for _, d := range out.Decisions {
+		id := strings.ToUpper(strings.TrimSpace(d.ID))
 		if !d.Keep {
-			drop[strings.ToUpper(strings.TrimSpace(d.ID))] = d.Reason
+			drop[id] = d.Reason
+		} else if _, ok := severityRank[d.Severity]; ok {
+			severity[id] = d.Severity
 		}
 	}
 	for i, c := range candidates {
-		if reason, ok := drop[fmt.Sprintf("F%d", i+1)]; ok {
+		id := fmt.Sprintf("F%d", i+1)
+		if reason, ok := drop[id]; ok {
 			t.Dropped = append(t.Dropped, c)
 			t.Reasons = append(t.Reasons, reason)
 			continue
+		}
+		if sev, ok := severity[id]; ok && sev != c.Severity {
+			t.Rerated++
+			c.Severity = sev
 		}
 		t.Kept = append(t.Kept, c)
 	}
