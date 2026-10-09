@@ -11,6 +11,7 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -28,6 +29,59 @@ type TokenFunc func(ctx context.Context) (string, error)
 type Store struct {
 	Dir   string
 	Token TokenFunc
+
+	mu    sync.Mutex
+	locks map[string]*sync.Mutex
+}
+
+func (s *Store) lock(name string) func() {
+	s.mu.Lock()
+	if s.locks == nil {
+		s.locks = map[string]*sync.Mutex{}
+	}
+	l := s.locks[name]
+	if l == nil {
+		l = &sync.Mutex{}
+		s.locks[name] = l
+	}
+	s.mu.Unlock()
+	l.Lock()
+	return l.Unlock
+}
+
+func (s *Store) Clone(ctx context.Context, fullName string) (string, error) {
+	owner, name, ok := strings.Cut(fullName, "/")
+	if !ok {
+		return "", fmt.Errorf("bad repo name %q", fullName)
+	}
+	root, err := filepath.Abs(s.Dir)
+	if err != nil {
+		return "", err
+	}
+	dir := filepath.Join(root, name)
+	defer s.lock(name)()
+	if _, err := os.Stat(filepath.Join(dir, ".git")); errors.Is(err, os.ErrNotExist) {
+		if err := os.MkdirAll(root, 0o755); err != nil {
+			return "", err
+		}
+		url := fmt.Sprintf("https://github.com/%s/%s.git", owner, name)
+		if _, err := s.git(ctx, root, cloneTimeout, true, "clone", "--quiet", "--no-recurse-submodules", url, dir); err != nil {
+			return "", fmt.Errorf("clone %s: %w", fullName, err)
+		}
+	} else if err != nil {
+		return "", err
+	}
+	return dir, nil
+}
+
+func (s *Store) Cloned(fullName string) bool {
+	_, name, _ := strings.Cut(fullName, "/")
+	root, err := filepath.Abs(s.Dir)
+	if err != nil {
+		return false
+	}
+	_, err = os.Stat(filepath.Join(root, name, ".git"))
+	return err == nil
 }
 
 type Repo struct {
@@ -37,26 +91,11 @@ type Repo struct {
 }
 
 func (s *Store) Ensure(ctx context.Context, fullName string, number int, head, base string) (*Repo, error) {
-	owner, name, ok := strings.Cut(fullName, "/")
-	if !ok {
-		return nil, fmt.Errorf("bad repo name %q", fullName)
-	}
-	root, err := filepath.Abs(s.Dir)
+	dir, err := s.Clone(ctx, fullName)
 	if err != nil {
 		return nil, err
 	}
-	dir := filepath.Join(root, name)
-	if _, err := os.Stat(filepath.Join(dir, ".git")); errors.Is(err, os.ErrNotExist) {
-		if err := os.MkdirAll(root, 0o755); err != nil {
-			return nil, err
-		}
-		url := fmt.Sprintf("https://github.com/%s/%s.git", owner, name)
-		if _, err := s.git(ctx, root, cloneTimeout, true, "clone", "--quiet", "--no-recurse-submodules", url, dir); err != nil {
-			return nil, fmt.Errorf("clone %s: %w", fullName, err)
-		}
-	} else if err != nil {
-		return nil, err
-	}
+	defer s.lock(filepath.Base(dir))()
 	ref := fmt.Sprintf("refs/pull/%d/head", number)
 	baseRef := "origin/" + base
 	if isSHA(base) {

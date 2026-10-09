@@ -18,8 +18,9 @@ each configured repository it:
    commit through read-only tools, and posts the result as a review with
    inline comments.
 
-With `clone_dir` set, each configured repository is cloned there on first
-use and the PR head is fetched before every review. The model reads files
+With `clone_dir` set, every configured repository is cloned there in the
+background when the service starts, so the first review of a repository is
+not delayed by a clone, and the PR head is fetched before every review. The model reads files
 with `git show <sha>:<path>`, so nothing is ever checked out and the working
 tree can be used normally. Without `clone_dir`, reviews use the diff alone.
 
