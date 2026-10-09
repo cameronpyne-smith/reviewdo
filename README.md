@@ -47,7 +47,9 @@ the instructions is discarded. A triage pass drops findings that say nothing
 concrete: reassurance, requests to "please verify", generic advice. Every
 remaining finding is re-checked by a separate, sceptical verification pass
 against the files before it is posted, highest severity first; rejected
-findings are dropped and overstated ones downgraded. When the time reserve
+findings are dropped and overstated ones downgraded. The verifier states
+what each verdict rests on: a finding that rests on how a browser, framework
+or library behaves must name the exact rule and is never posted above minor. When the time reserve
 runs out, unchecked Critical and Major findings are reported as unverified
 and unchecked Minor ones are dropped.
 

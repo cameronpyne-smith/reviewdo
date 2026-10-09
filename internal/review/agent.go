@@ -45,7 +45,9 @@ const VerifyPrompt = `You are checking one finding from an automated code review
 
 Re-read the lines the finding points at and whatever else is needed to decide whether it is true. Be sceptical. A finding is rejected if it misreads the code, describes something that is already handled, or is speculative. If the finding claims a syntax error, an invalid or unsupported argument, option, field, metric or API, or that something does not exist, you must call search_base for the same construct before deciding: the reviewer's knowledge of languages and external tools may be out of date, and if the base branch uses the construct, the finding is wrong and must be rejected. If the base branch does not use it and you cannot prove the claim from the repository, reject it unless it concerns an external fact the repository cannot settle, in which case downgrade it to minor with a body that says exactly what would be wrong and what it would cause, never a request to verify. A finding that rests on how a library, client or broker behaves (what a method throws, which interface a type implements, what happens on failure) is confirmed only if the repository shows that behaviour in a test, a comment or other code handling the same case; the reviewer's memory of a library is not evidence, and neither is yours. Otherwise reject it. A finding is downgraded if the problem is real but less severe than stated or needs rewording to be accurate. A finding is confirmed only if you have checked it against the files and it holds as written.
 
-Call submit_verdict exactly once with: verdict (confirmed, downgraded or rejected), severity (critical, major, minor or nit; the severity it should be posted at), body, and reason (one sentence for the log). The body is the comment the author will read. Write it to the author about the code, never as a judgement on "the finding" or "the reviewer", and never mention this check. Remove any narration of what the reviewer did, searched or could not find. When the verdict is confirmed, return the original body unchanged. When it is downgraded, rewrite the body so it states accurately what is wrong and why it matters.`
+Say what the verdict rests on in basis: "repository" when the files, tests or the base branch show it; "platform" when it rests on how a browser, a UI framework, a runtime, a language feature or a library behaves (what an input renders, how a directive or attribute is parsed, what a default is, what a method returns); "external" when it rests on a provider or third-party fact the repository cannot settle. For a platform basis, state in rule the exact behaviour you rely on as one specific sentence, and where the repository shows it; if nothing in the repository shows it and you are not certain of the exact rule, reject: a plausible memory of how a platform behaves is how wrong findings get posted. A platform finding is never posted above minor.
+
+Call submit_verdict exactly once with: verdict (confirmed, downgraded or rejected), severity (critical, major, minor or nit; the severity it should be posted at), basis, rule (the platform or external rule relied on, empty otherwise), body, and reason (one sentence for the log). The body is the comment the author will read. Write it to the author about the code, never as a judgement on "the finding" or "the reviewer", and never mention this check. Remove any narration of what the reviewer did, searched or could not find. When the verdict is confirmed, return the original body unchanged. When it is downgraded, rewrite the body so it states accurately what is wrong and why it matters.`
 
 var reviewTools = []ollama.Tool{
 	fn("read_file", "Read one file from the repository at the pull request head commit, optionally only a range of lines. A large file is returned as its outline plus the changed regions in context; use start and end for other parts.",
@@ -71,10 +73,12 @@ var verifyTools = append(append([]ollama.Tool{}, reviewTools[:len(reviewTools)-1
   "properties": {
     "verdict": {"type": "string", "enum": ["confirmed", "downgraded", "rejected"]},
     "severity": {"type": "string", "enum": ["critical", "major", "minor", "nit"]},
+    "basis": {"type": "string", "enum": ["repository", "platform", "external"]},
+    "rule": {"type": "string"},
     "body": {"type": "string"},
     "reason": {"type": "string"}
   },
-  "required": ["verdict", "severity", "body", "reason"]
+  "required": ["verdict", "severity", "basis", "rule", "body", "reason"]
 }`))
 
 func fn(name, desc, params string) ollama.Tool {
@@ -395,8 +399,27 @@ func RunSingle(ctx context.Context, llm *ollama.Client, system, user string, sch
 type Verdict struct {
 	Verdict  string `json:"verdict"`
 	Severity string `json:"severity"`
+	Basis    string `json:"basis"`
+	Rule     string `json:"rule"`
 	Body     string `json:"body"`
 	Reason   string `json:"reason"`
+}
+
+func applyBasis(v Verdict) Verdict {
+	if v.Verdict == "rejected" || v.Basis == "repository" {
+		return v
+	}
+	if v.Basis == "platform" && len(strings.Fields(v.Rule)) < 4 {
+		v.Verdict = "rejected"
+		v.Reason = "rests on platform behaviour without a stated rule: " + v.Reason
+		return v
+	}
+	if severityRank[v.Severity] < severityRank["minor"] {
+		v.Verdict = "downgraded"
+		v.Severity = "minor"
+		v.Reason = "capped at minor, rests on " + v.Basis + " behaviour: " + v.Reason
+	}
+	return v
 }
 
 func VerifyFinding(ctx context.Context, llm *ollama.Client, repo Repo, header string, c Comment, fileDiff string, lim Limits, log *slog.Logger) (Verdict, Stats, error) {
@@ -430,7 +453,7 @@ func VerifyFinding(ctx context.Context, llm *ollama.Client, repo Repo, header st
 	if err := json.Unmarshal(raw, &v); err != nil {
 		return Verdict{}, st, fmt.Errorf("verdict is not valid JSON: %w", err)
 	}
-	return v, st, nil
+	return applyBasis(v), st, nil
 }
 
 func truncate(s string, n int) string {

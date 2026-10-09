@@ -617,7 +617,7 @@ func (p *Poller) ReviewAt(ctx context.Context, repoCfg config.Repo, pull *github
 				kept = append(kept, c)
 				continue
 			}
-			log.Info("verified finding", "path", c.Path, "line", c.Line, "was", c.Severity, "verdict", v.Verdict, "now", v.Severity, "reason", v.Reason, "took", st.Duration.Round(time.Second))
+			log.Info("verified finding", "path", c.Path, "line", c.Line, "was", c.Severity, "verdict", v.Verdict, "now", v.Severity, "basis", v.Basis, "reason", v.Reason, "took", st.Duration.Round(time.Second))
 			if v.Verdict == "rejected" {
 				rejected = append(rejected, c)
 				continue
