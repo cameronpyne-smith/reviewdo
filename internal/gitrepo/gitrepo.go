@@ -41,19 +41,27 @@ func (s *Store) Ensure(ctx context.Context, fullName string, number int, head, b
 	if !ok {
 		return nil, fmt.Errorf("bad repo name %q", fullName)
 	}
-	dir := filepath.Join(s.Dir, name)
+	root, err := filepath.Abs(s.Dir)
+	if err != nil {
+		return nil, err
+	}
+	dir := filepath.Join(root, name)
 	if _, err := os.Stat(filepath.Join(dir, ".git")); errors.Is(err, os.ErrNotExist) {
-		if err := os.MkdirAll(s.Dir, 0o755); err != nil {
+		if err := os.MkdirAll(root, 0o755); err != nil {
 			return nil, err
 		}
 		url := fmt.Sprintf("https://github.com/%s/%s.git", owner, name)
-		if _, err := s.git(ctx, s.Dir, cloneTimeout, true, "clone", "--quiet", "--no-recurse-submodules", url, dir); err != nil {
+		if _, err := s.git(ctx, root, cloneTimeout, true, "clone", "--quiet", "--no-recurse-submodules", url, dir); err != nil {
 			return nil, fmt.Errorf("clone %s: %w", fullName, err)
 		}
 	} else if err != nil {
 		return nil, err
 	}
 	ref := fmt.Sprintf("refs/pull/%d/head", number)
+	baseRef := "origin/" + base
+	if isSHA(base) {
+		baseRef = base
+	}
 	if _, err := s.git(ctx, dir, cloneTimeout, true, "fetch", "--quiet", "--no-recurse-submodules", "origin", base, ref); err != nil {
 		return nil, fmt.Errorf("fetch %s and %s: %w", base, ref, err)
 	}
@@ -62,7 +70,19 @@ func (s *Store) Ensure(ctx context.Context, fullName string, number int, head, b
 			return nil, fmt.Errorf("commit %s not available: %w", head, err)
 		}
 	}
-	return &Repo{dir: dir, head: head, base: "origin/" + base}, nil
+	return &Repo{dir: dir, head: head, base: baseRef}, nil
+}
+
+func isSHA(s string) bool {
+	if len(s) != 40 {
+		return false
+	}
+	for _, c := range s {
+		if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f') {
+			return false
+		}
+	}
+	return true
 }
 
 func (s *Store) git(ctx context.Context, dir string, timeout time.Duration, auth bool, args ...string) ([]byte, error) {

@@ -75,6 +75,28 @@ reviewdo -config config.json review -model m -think false owner/repo#12
 reviewdo -config config.json run                         # poll loop (default)
 ```
 
+### Benchmark
+
+`reviewdo bench` measures reviews against Copilot's, using pull requests whose
+Copilot comments the authors already replied to. Every reply says whether the
+finding was real, so the labels come for free. The data lives in `bench/`
+(gitignored, it quotes your code) and the review runs at the commit Copilot
+reviewed, so the same bugs are present.
+
+```
+reviewdo -config config.json bench mine -authors me,colleague   # collect reviewed PRs
+reviewdo -config config.json bench label                         # label findings from replies
+reviewdo bench propose -since 2026-07-01 -n 10 -write            # pick a smoke set
+reviewdo -config config.json bench run -label baseline           # review and score the set
+reviewdo bench report -label baseline -against tweak             # compare two runs
+```
+
+Scoring pairs each golden finding with a review comment using the local model
+as a judge, cross-checked by a same-file-within-five-lines match. The report
+gives recall on valid findings, how many rejected Copilot findings were
+repeated, and the comments that matched nothing, which `runs/<label>/triage.md`
+lists for checking by hand.
+
 ## Review guidance
 
 Three layers are added to every prompt, in this order: global instructions

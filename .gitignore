@@ -1,3 +1,6 @@
 /reviewdo
 /config.json
 *.pem
+/improvements.md
+/research/
+/bench/

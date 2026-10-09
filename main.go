@@ -71,6 +71,8 @@ func main() {
 		err = showReviews(ctx, *cfgPath, args)
 	case "review":
 		err = reviewOne(ctx, *cfgPath, args, log)
+	case "bench":
+		err = benchCmd(ctx, *cfgPath, args, log)
 	default:
 		fs.Usage()
 		os.Exit(2)

@@ -205,27 +205,87 @@ func (p *Poller) commentTriggers(ctx context.Context, repo string, rs *state.Rep
 	return out, nil
 }
 
+type Outcome struct {
+	Result   *review.Result
+	Output   review.Output
+	Files    []*diff.File
+	Scope    review.Scope
+	Rejected []review.Comment
+	Stats    review.Stats
+	Parts    int
+	Took     time.Duration
+	Empty    bool
+	DiffOnly bool
+}
+
 func (p *Poller) Review(ctx context.Context, repoCfg config.Repo, pull *github.Pull, previousSHA string) error {
 	ctx, cancel := context.WithTimeout(ctx, p.cfg.Review.Timeout.Duration)
 	defer cancel()
 	log := p.log.With("pr", pull.Number)
-	fullDiff, err := p.gh.PullDiff(ctx, repoCfg.Name, pull.Number)
+	oc, err := p.ReviewAt(ctx, repoCfg, pull, pull.Head.SHA, pull.Base.Ref, previousSHA, log)
 	if err != nil {
-		return fmt.Errorf("fetch diff: %w", err)
+		return err
+	}
+	if oc.Empty {
+		log.Info("nothing reviewable in diff")
+		if p.DryRun {
+			return nil
+		}
+		_, err := p.gh.CreateReview(ctx, repoCfg.Name, pull.Number, github.ReviewRequest{
+			CommitID: pull.Head.SHA,
+			Event:    "COMMENT",
+			Body:     fmt.Sprintf("## 🟢 Ready to merge ✅\n\nNo reviewable changes %s. All changed files are ignored or binary.", oc.Scope),
+		})
+		return err
+	}
+	out := oc.Output
+	if p.DryRun {
+		fmt.Printf("=== %s#%d (%s) ===\n\n%s\n", repoCfg.Name, pull.Number, oc.Scope, out.Body)
+		for _, c := range out.Comments {
+			fmt.Printf("--- %s:%d\n%s\n\n", c.Path, c.Line, c.Body)
+		}
+		return nil
+	}
+
+	req := github.ReviewRequest{CommitID: pull.Head.SHA, Body: out.Body, Event: "COMMENT", Comments: out.Comments}
+	rv, err := p.gh.CreateReview(ctx, repoCfg.Name, pull.Number, req)
+	if github.IsStatus(err, http.StatusUnprocessableEntity) && len(out.Comments) > 0 {
+		log.Warn("inline comments rejected, posting them in the review body", "err", err)
+		req.Comments = nil
+		req.Body = review.FoldComments(out)
+		rv, err = p.gh.CreateReview(ctx, repoCfg.Name, pull.Number, req)
+	}
+	if err != nil {
+		return fmt.Errorf("post review: %w", err)
+	}
+	log.Info("review url", "url", rv.HTMLURL, "inline", len(req.Comments))
+	return nil
+}
+
+func (p *Poller) ReviewAt(ctx context.Context, repoCfg config.Repo, pull *github.Pull, head, base, previousSHA string, log *slog.Logger) (*Outcome, error) {
+	var fullDiff []byte
+	var err error
+	if head == pull.Head.SHA {
+		fullDiff, err = p.gh.PullDiff(ctx, repoCfg.Name, pull.Number)
+	} else {
+		fullDiff, err = p.gh.CompareDiff(ctx, repoCfg.Name, base, head)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("fetch diff: %w", err)
 	}
 	files := diff.Parse(fullDiff)
 	promptFiles := files
-	scope := review.Scope{ToSHA: pull.Head.SHA}
-	if previousSHA != "" && previousSHA != pull.Head.SHA {
-		if inc := p.incrementalDiff(ctx, repoCfg.Name, previousSHA, pull.Head.SHA); inc != nil {
+	scope := review.Scope{ToSHA: head}
+	if previousSHA != "" && previousSHA != head {
+		if inc := p.incrementalDiff(ctx, repoCfg.Name, previousSHA, head); inc != nil {
 			promptFiles = inc
-			scope = review.Scope{Incremental: true, FromSHA: previousSHA, ToSHA: pull.Head.SHA}
+			scope = review.Scope{Incremental: true, FromSHA: previousSHA, ToSHA: head}
 		}
 	}
 
 	var repo *gitrepo.Repo
 	if p.store != nil {
-		repo, err = p.store.Ensure(ctx, repoCfg.Name, pull.Number, pull.Head.SHA, pull.Base.Ref)
+		repo, err = p.store.Ensure(ctx, repoCfg.Name, pull.Number, head, base)
 		if err != nil {
 			log.Warn("repository unavailable, reviewing from the diff alone", "err", err)
 		}
@@ -252,16 +312,7 @@ func (p *Poller) Review(ctx context.Context, repoCfg config.Repo, pull *github.P
 
 	groups := review.Groups(promptFiles, p.cfg.Review.Ignore, p.cfg.Review.PartBytes)
 	if len(groups) == 0 {
-		log.Info("nothing reviewable in diff")
-		if p.DryRun {
-			return nil
-		}
-		_, err := p.gh.CreateReview(ctx, repoCfg.Name, pull.Number, github.ReviewRequest{
-			CommitID: pull.Head.SHA,
-			Event:    "COMMENT",
-			Body:     fmt.Sprintf("## 🟢 Ready to merge ✅\n\nNo reviewable changes %s. All changed files are ignored or binary.", scope),
-		})
-		return err
+		return &Outcome{Files: files, Scope: scope, Empty: true}, nil
 	}
 
 	var parts []*review.Result
@@ -305,7 +356,7 @@ func (p *Poller) Review(ctx context.Context, repoCfg config.Repo, pull *github.P
 		parts = append(parts, res)
 	}
 	if len(parts) == 0 {
-		return errors.New("every part of the review failed")
+		return nil, errors.New("every part of the review failed")
 	}
 	res := review.Merge(parts)
 	var rejected []review.Comment
@@ -361,41 +412,21 @@ func (p *Poller) Review(ctx context.Context, repoCfg config.Repo, pull *github.P
 		raw, st, err := review.RunSingle(ctx, p.llm, review.SynthesisPrompt, review.SynthesisInput(header, parts, res.Comments, rejected), review.SynthesisSchema)
 		total.Merge(st)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		var syn struct {
 			Verdict string `json:"verdict"`
 			Summary string `json:"summary"`
 		}
 		if err := json.Unmarshal(raw, &syn); err != nil {
-			return fmt.Errorf("synthesis output invalid: %w", err)
+			return nil, fmt.Errorf("synthesis output invalid: %w", err)
 		}
 		res.Verdict, res.Summary = syn.Verdict, syn.Summary
 	}
 	log.Info("review complete", "model", p.llm.Model(), "parts", len(parts), "findings", len(res.Comments), "rounds", total.Rounds, "tool_calls", total.ToolCalls, "context_tokens", total.PromptTokens, "output_tokens", total.OutputTokens, "model_time", total.Duration.Round(time.Second), "took", time.Since(start).Round(time.Second))
 
 	out := review.Render(res, files, scope, p.cfg.Review.MaxComments, p.botSlug, p.cfg.Label)
-	if p.DryRun {
-		fmt.Printf("=== %s#%d (%s) ===\n\n%s\n", repoCfg.Name, pull.Number, scope, out.Body)
-		for _, c := range out.Comments {
-			fmt.Printf("--- %s:%d\n%s\n\n", c.Path, c.Line, c.Body)
-		}
-		return nil
-	}
-
-	req := github.ReviewRequest{CommitID: pull.Head.SHA, Body: out.Body, Event: "COMMENT", Comments: out.Comments}
-	rv, err := p.gh.CreateReview(ctx, repoCfg.Name, pull.Number, req)
-	if github.IsStatus(err, http.StatusUnprocessableEntity) && len(out.Comments) > 0 {
-		log.Warn("inline comments rejected, posting them in the review body", "err", err)
-		req.Comments = nil
-		req.Body = review.FoldComments(out)
-		rv, err = p.gh.CreateReview(ctx, repoCfg.Name, pull.Number, req)
-	}
-	if err != nil {
-		return fmt.Errorf("post review: %w", err)
-	}
-	log.Info("review url", "url", rv.HTMLURL, "inline", len(req.Comments))
-	return nil
+	return &Outcome{Result: res, Output: out, Files: files, Scope: scope, Rejected: rejected, Stats: total, Parts: len(parts), Took: time.Since(start), DiffOnly: repo == nil}, nil
 }
 
 func (p *Poller) incrementalDiff(ctx context.Context, repo, from, to string) []*diff.File {
