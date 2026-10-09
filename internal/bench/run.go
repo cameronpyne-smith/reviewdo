@@ -136,8 +136,8 @@ func runOne(ctx context.Context, p *poller.Poller, cfg *config.Config, gh *githu
 	res.Parts, res.Rounds, res.ToolCalls = oc.Parts, oc.Stats.Rounds, oc.Stats.ToolCalls
 	res.PromptTokens, res.OutputTokens, res.Unverified = oc.Stats.PromptTokens, oc.Stats.OutputTokens, oc.Result.Unverified
 	posted := map[string]bool{}
-	for _, c := range oc.Output.Comments {
-		posted[fmt.Sprintf("%s:%d", c.Path, c.Line)] = true
+	for _, e := range oc.Output.Entries {
+		posted[fmt.Sprintf("%s:%d", e.Path, e.Line)] = true
 	}
 	n := 0
 	seen := map[string]bool{}
