@@ -497,9 +497,10 @@ func (p *Poller) ReviewAt(ctx context.Context, repoCfg config.Repo, pull *github
 		lim.Deadline = lim.Deadline.Add(-20 * time.Second)
 		lim.MustRead = mustRead(group, p.cfg.Review.Ignore, 6)
 		lim.Changed = review.ChangedSpans(group)
-		var symbols string
+		var symbols, siblings string
 		if repo != nil {
 			symbols = review.Symbols(ctx, repo, group)
+			siblings = review.Siblings(ctx, repo, group)
 		}
 		prompt := review.BuildPrompt(review.Input{
 			Repo:     repoCfg.Name,
@@ -508,6 +509,7 @@ func (p *Poller) ReviewAt(ctx context.Context, repoCfg config.Repo, pull *github
 			Scope:    scope,
 			Layout:   layout,
 			Symbols:  symbols,
+			Siblings: siblings,
 			Files:    group,
 			AllFiles: promptPaths,
 			Ignore:   p.cfg.Review.Ignore,

@@ -120,6 +120,7 @@ type Input struct {
 	Scope    Scope
 	Layout   string
 	Symbols  string
+	Siblings string
 	Files    []*diff.File
 	AllFiles []string
 	Ignore   []string
@@ -174,6 +175,10 @@ func BuildPrompt(in Input) Prompt {
 	if in.Symbols != "" {
 		b.WriteString("\n")
 		b.WriteString(in.Symbols)
+	}
+	if in.Siblings != "" {
+		b.WriteString("\n")
+		b.WriteString(in.Siblings)
 	}
 
 	var body strings.Builder

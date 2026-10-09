@@ -20,7 +20,10 @@ each configured repository it:
    PRs, oldest first; every repository is rescanned between reviews so a
    new request never waits behind the backlog.
 4. Fetches the diff, lists every declaration the diff adds, changes or
-   removes with where the repository uses that name, lets the model read
+   removes with where the repository uses that name, compares each changed
+   file with its counterparts under sibling directories (environment
+   overlays, sibling apps) and names the keys most of them set that this
+   file lacks, lets the model read
    the repository at the PR's head commit through read-only tools, and
    posts the result as a review: a
    verdict, a one-line summary, a findings list with each finding's
