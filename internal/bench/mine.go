@@ -14,6 +14,7 @@ import (
 type MineOptions struct {
 	Org     string
 	Authors []string
+	PRs     []SetEntry
 	Refresh bool
 }
 
@@ -26,6 +27,40 @@ func Mine(ctx context.Context, gh *github.Client, dir Dir, opt MineOptions, log 
 	defer func() {
 		log.Info("mining finished", "listed", stats.listed, "fetched", stats.fetched, "with_copilot", stats.kept, "already_known", stats.skipped)
 	}()
+	mine := func(sp github.SearchedPull) error {
+		stats.listed++
+		key := fmt.Sprintf("%s#%d", sp.Repo, sp.Number)
+		if !opt.Refresh && (dir.HasPR(sp.Repo, sp.Number) || seen.m[key]) {
+			stats.skipped++
+			return nil
+		}
+		detail, err := fetchDetail(ctx, gh, sp.Repo, sp.Number)
+		if err != nil {
+			return fmt.Errorf("%s: %w", key, err)
+		}
+		stats.fetched++
+		p := toPR(sp, detail)
+		if len(p.Reviews) == 0 {
+			seen.m[key] = true
+			if stats.fetched%25 == 0 {
+				seen.save()
+			}
+			return nil
+		}
+		stats.kept++
+		log.Info("mined", "pr", key, "copilot_reviews", len(p.Reviews), "threads", len(p.Threads))
+		return dir.SavePR(p)
+	}
+	for _, e := range opt.PRs {
+		sp, err := gh.PullSummary(ctx, e.Repo, e.Number)
+		if err != nil {
+			return err
+		}
+		if err := mine(sp); err != nil {
+			seen.save()
+			return err
+		}
+	}
 	for _, author := range opt.Authors {
 		before := time.Time{}
 		for {
@@ -37,31 +72,10 @@ func Mine(ctx context.Context, gh *github.Client, dir Dir, opt MineOptions, log 
 			n := 0
 			total, err := gh.SearchPulls(ctx, q, func(sp github.SearchedPull) error {
 				n++
-				stats.listed++
 				if oldest.IsZero() || sp.CreatedAt.Before(oldest) {
 					oldest = sp.CreatedAt
 				}
-				key := fmt.Sprintf("%s#%d", sp.Repo, sp.Number)
-				if !opt.Refresh && (dir.HasPR(sp.Repo, sp.Number) || seen.m[key]) {
-					stats.skipped++
-					return nil
-				}
-				detail, err := fetchDetail(ctx, gh, sp.Repo, sp.Number)
-				if err != nil {
-					return fmt.Errorf("%s: %w", key, err)
-				}
-				stats.fetched++
-				p := toPR(sp, detail)
-				if len(p.Reviews) == 0 {
-					seen.m[key] = true
-					if stats.fetched%25 == 0 {
-						seen.save()
-					}
-					return nil
-				}
-				stats.kept++
-				log.Info("mined", "pr", key, "copilot_reviews", len(p.Reviews), "threads", len(p.Threads))
-				return dir.SavePR(p)
+				return mine(sp)
 			})
 			if err != nil {
 				seen.save()

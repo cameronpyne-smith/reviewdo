@@ -70,6 +70,63 @@ const searchPullsQuery = `query($q: String!, $after: String) {
   }
 }`
 
+const pullSummaryQuery = `query($owner: String!, $name: String!, $number: Int!) {
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $number) {
+      number title state createdAt mergedAt baseRefName baseRefOid headRefOid additions deletions changedFiles
+      author { login }
+      repository { nameWithOwner }
+    }
+  }
+}`
+
+type searchedPullNode struct {
+	Number       int       `json:"number"`
+	Title        string    `json:"title"`
+	State        string    `json:"state"`
+	CreatedAt    time.Time `json:"createdAt"`
+	MergedAt     time.Time `json:"mergedAt"`
+	BaseRefName  string    `json:"baseRefName"`
+	BaseRefOid   string    `json:"baseRefOid"`
+	HeadRefOid   string    `json:"headRefOid"`
+	Additions    int       `json:"additions"`
+	Deletions    int       `json:"deletions"`
+	ChangedFiles int       `json:"changedFiles"`
+	Author       struct {
+		Login string `json:"login"`
+	} `json:"author"`
+	Repository struct {
+		NameWithOwner string `json:"nameWithOwner"`
+	} `json:"repository"`
+}
+
+func (n searchedPullNode) summary() SearchedPull {
+	return SearchedPull{
+		Repo: n.Repository.NameWithOwner, Number: n.Number, Title: n.Title, Author: n.Author.Login, State: n.State,
+		CreatedAt: n.CreatedAt, MergedAt: n.MergedAt, BaseRef: n.BaseRefName, BaseSHA: n.BaseRefOid, HeadSHA: n.HeadRefOid,
+		Additions: n.Additions, Deletions: n.Deletions, ChangedFiles: n.ChangedFiles,
+	}
+}
+
+func (c *Client) PullSummary(ctx context.Context, repo string, number int) (SearchedPull, error) {
+	owner, name, ok := strings.Cut(repo, "/")
+	if !ok {
+		return SearchedPull{}, fmt.Errorf("bad repo %q", repo)
+	}
+	var out struct {
+		Repository struct {
+			PullRequest searchedPullNode `json:"pullRequest"`
+		} `json:"repository"`
+	}
+	if err := c.GraphQL(ctx, pullSummaryQuery, map[string]any{"owner": owner, "name": name, "number": number}, &out); err != nil {
+		return SearchedPull{}, err
+	}
+	if out.Repository.PullRequest.Number == 0 {
+		return SearchedPull{}, fmt.Errorf("%s#%d not found", repo, number)
+	}
+	return out.Repository.PullRequest.summary(), nil
+}
+
 func (c *Client) SearchPulls(ctx context.Context, query string, visit func(SearchedPull) error) (int, error) {
 	var after any
 	count := 0
@@ -81,25 +138,7 @@ func (c *Client) SearchPulls(ctx context.Context, query string, visit func(Searc
 					HasNextPage bool   `json:"hasNextPage"`
 					EndCursor   string `json:"endCursor"`
 				} `json:"pageInfo"`
-				Nodes []struct {
-					Number       int       `json:"number"`
-					Title        string    `json:"title"`
-					State        string    `json:"state"`
-					CreatedAt    time.Time `json:"createdAt"`
-					MergedAt     time.Time `json:"mergedAt"`
-					BaseRefName  string    `json:"baseRefName"`
-					BaseRefOid   string    `json:"baseRefOid"`
-					HeadRefOid   string    `json:"headRefOid"`
-					Additions    int       `json:"additions"`
-					Deletions    int       `json:"deletions"`
-					ChangedFiles int       `json:"changedFiles"`
-					Author       struct {
-						Login string `json:"login"`
-					} `json:"author"`
-					Repository struct {
-						NameWithOwner string `json:"nameWithOwner"`
-					} `json:"repository"`
-				} `json:"nodes"`
+				Nodes []searchedPullNode `json:"nodes"`
 			} `json:"search"`
 		}
 		if err := c.GraphQL(ctx, searchPullsQuery, map[string]any{"q": query, "after": after}, &out); err != nil {
@@ -110,11 +149,7 @@ func (c *Client) SearchPulls(ctx context.Context, query string, visit func(Searc
 				continue
 			}
 			count++
-			if err := visit(SearchedPull{
-				Repo: n.Repository.NameWithOwner, Number: n.Number, Title: n.Title, Author: n.Author.Login, State: n.State,
-				CreatedAt: n.CreatedAt, MergedAt: n.MergedAt, BaseRef: n.BaseRefName, BaseSHA: n.BaseRefOid, HeadSHA: n.HeadRefOid,
-				Additions: n.Additions, Deletions: n.Deletions, ChangedFiles: n.ChangedFiles,
-			}); err != nil {
+			if err := visit(n.summary()); err != nil {
 				return count, err
 			}
 		}

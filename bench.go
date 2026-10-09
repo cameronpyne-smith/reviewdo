@@ -86,11 +86,29 @@ func parseDate(s string) (time.Time, error) {
 func benchMine(ctx context.Context, cfgPath string, dir bench.Dir, args []string, log *slog.Logger) error {
 	fs := flag.NewFlagSet("bench mine", flag.ExitOnError)
 	authors := fs.String("authors", "", "comma-separated GitHub logins whose PRs to mine")
+	prs := fs.String("prs", "", "comma-separated owner/repo#N to mine regardless of author")
 	org := fs.String("org", "", "organisation to search (default: owner of the first configured repo)")
 	refresh := fs.Bool("refresh", false, "refetch PRs already in the pool")
 	fs.Parse(args)
-	if *authors == "" {
-		return errors.New("bench mine: -authors is required")
+	if *authors == "" && *prs == "" {
+		return errors.New("bench mine: -authors or -prs is required")
+	}
+	var entries []bench.SetEntry
+	for _, ref := range strings.Split(*prs, ",") {
+		if ref == "" {
+			continue
+		}
+		repo, num, err := poller.ParseRef(ref)
+		if err != nil {
+			return err
+		}
+		entries = append(entries, bench.SetEntry{Repo: repo, Number: num})
+	}
+	var logins []string
+	for _, a := range strings.Split(*authors, ",") {
+		if a != "" {
+			logins = append(logins, a)
+		}
 	}
 	a, err := setup(ctx, cfgPath)
 	if err != nil {
@@ -99,7 +117,7 @@ func benchMine(ctx context.Context, cfgPath string, dir bench.Dir, args []string
 	if *org == "" {
 		*org, _, _ = strings.Cut(a.cfg.Repos[0].Name, "/")
 	}
-	return bench.Mine(ctx, a.gh, dir, bench.MineOptions{Org: *org, Authors: strings.Split(*authors, ","), Refresh: *refresh}, log)
+	return bench.Mine(ctx, a.gh, dir, bench.MineOptions{Org: *org, Authors: logins, PRs: entries, Refresh: *refresh}, log)
 }
 
 func benchLabel(ctx context.Context, cfgPath string, dir bench.Dir, args []string, log *slog.Logger) error {
