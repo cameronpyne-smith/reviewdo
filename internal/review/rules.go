@@ -204,10 +204,34 @@ func Rules(ctx context.Context, llm *ollama.Client, docs []Instruction, files []
 			})
 		}
 	}
+	all = groupByRule(all)
 	if len(errs) > 0 {
 		return all, total, fmt.Errorf("rules: %s", strings.Join(errs, "; "))
 	}
 	return all, total, nil
+}
+
+func groupByRule(violations []Violation) []Violation {
+	var out []Violation
+	first := map[string]int{}
+	more := map[int][]string{}
+	for _, v := range violations {
+		key := v.Source + "\n" + plainText(v.Rule)
+		if i, ok := first[key]; ok {
+			at := fmt.Sprintf("%s:%d", v.Path, v.Line)
+			if v.Path == out[i].Path {
+				at = fmt.Sprintf("line %d", v.Line)
+			}
+			more[i] = append(more[i], at)
+			continue
+		}
+		first[key] = len(out)
+		out = append(out, v)
+	}
+	for i, places := range more {
+		out[i].Body += "\n\nThe same rule applies at " + strings.Join(places, ", ") + "."
+	}
+	return out
 }
 
 func AddViolations(comments []Comment, violations []Violation) ([]Comment, int) {

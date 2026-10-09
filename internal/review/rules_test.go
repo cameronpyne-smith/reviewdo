@@ -72,3 +72,19 @@ func TestAddViolationsSkipsNearbyFindings(t *testing.T) {
 		t.Fatalf("added %d, total %d", added, len(out))
 	}
 }
+
+func TestGroupByRuleKeepsOneFindingPerRule(t *testing.T) {
+	v := []Violation{
+		{Comment: Comment{Path: "a.cs", Line: 10, Body: "first"}, Rule: "Tests use `Given_When_Then`", Source: "g.md"},
+		{Comment: Comment{Path: "a.cs", Line: 20, Body: "second"}, Rule: "Tests use Given_When_Then", Source: "g.md"},
+		{Comment: Comment{Path: "b.cs", Line: 5, Body: "third"}, Rule: "Tests use Given_When_Then", Source: "g.md"},
+		{Comment: Comment{Path: "a.cs", Line: 30, Body: "other"}, Rule: "Commands carry CorrelationId", Source: "g.md"},
+	}
+	out := groupByRule(v)
+	if len(out) != 2 || out[0].Line != 10 || out[1].Line != 30 {
+		t.Fatalf("got %+v", out)
+	}
+	if !strings.Contains(out[0].Body, "The same rule applies at line 20, b.cs:5.") {
+		t.Errorf("body: %q", out[0].Body)
+	}
+}
