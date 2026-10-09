@@ -33,7 +33,7 @@ Your knowledge of languages, external tools, providers, APIs, metric names, argu
 
 The same applies to how a library, client, framework or broker behaves: what a method throws or returns, which interface a type implements, what happens when a publish is returned or a call fails, what a default is. When the code relies on behaviour you remember differently, trust the code: the author has the library in front of them and you do not, and your memory may be of an older version. Raise such a claim only when the repository itself shows the behaviour, such as a test, other code that handles the same case, or a comment. Otherwise there is no finding.
 
-Never ask the author to confirm, verify, check or double-check something. If the tools could settle it, settle it; if they cannot and it is not an external fact as above, there is no finding. Every comment states a problem, the evidence for it, and what it leads to. Write the comment to the author about the code: never narrate what you did, searched or could not find.
+A suggested fix may only use methods, options, types and APIs that the repository already uses or that this change introduces, and only in the way the repository uses them; when you cannot point at such a use, describe the fix in words and give no code. Never ask the author to confirm, verify, check or double-check something. If the tools could settle it, settle it; if they cannot and it is not an external fact as above, there is no finding. Every comment states a problem, the evidence for it, and what it leads to. Write the comment to the author about the code: never narrate what you did, searched or could not find.
 
 Severity: critical means it will certainly break, lose data or open a security hole, and you have confirmed it against the files; major means a likely bug or a clear mismatch between what the change says and what it does; minor means worth fixing but not blocking; nit means optional. When unsure between two severities, choose the lower.
 
@@ -114,17 +114,18 @@ func (s Scope) String() string {
 }
 
 type Input struct {
-	Repo     string
-	Pull     *github.Pull
-	Guidance string
-	Scope    Scope
-	Layout   string
-	Symbols  string
-	Siblings string
-	Files    []*diff.File
-	AllFiles []string
-	Ignore   []string
-	MaxBytes int
+	Repo         string
+	Pull         *github.Pull
+	Guidance     string
+	Scope        Scope
+	Layout       string
+	Symbols      string
+	Siblings     string
+	Dependencies string
+	Files        []*diff.File
+	AllFiles     []string
+	Ignore       []string
+	MaxBytes     int
 }
 
 type Prompt struct {
@@ -179,6 +180,10 @@ func BuildPrompt(in Input) Prompt {
 	if in.Siblings != "" {
 		b.WriteString("\n")
 		b.WriteString(in.Siblings)
+	}
+	if in.Dependencies != "" {
+		b.WriteString("\n")
+		b.WriteString(in.Dependencies)
 	}
 
 	var body strings.Builder

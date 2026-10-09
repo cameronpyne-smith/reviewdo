@@ -461,6 +461,10 @@ func (p *Poller) ReviewAt(ctx context.Context, repoCfg config.Repo, pull *github
 	}
 	guidance := review.RenderInstructions(p.cfg.Instructions, repoCfg.Instructions, repoInstructions)
 	header := review.Header(repoCfg.Name, pull)
+	var dependencies string
+	if repo != nil {
+		dependencies = review.Dependencies(ctx, repo, files)
+	}
 	maxContext := p.cfg.Ollama.NumCtx * 4 / 5
 	lim := review.Limits{MaxToolCalls: p.cfg.Review.MaxToolCalls, MaxOutput: p.cfg.Review.MaxOutput, MaxContext: maxContext}
 
@@ -503,17 +507,18 @@ func (p *Poller) ReviewAt(ctx context.Context, repoCfg config.Repo, pull *github
 			siblings = review.Siblings(ctx, repo, group)
 		}
 		prompt := review.BuildPrompt(review.Input{
-			Repo:     repoCfg.Name,
-			Pull:     pull,
-			Guidance: guidance,
-			Scope:    scope,
-			Layout:   layout,
-			Symbols:  symbols,
-			Siblings: siblings,
-			Files:    group,
-			AllFiles: promptPaths,
-			Ignore:   p.cfg.Review.Ignore,
-			MaxBytes: p.cfg.Review.MaxDiffBytes,
+			Repo:         repoCfg.Name,
+			Pull:         pull,
+			Guidance:     guidance,
+			Scope:        scope,
+			Layout:       layout,
+			Symbols:      symbols,
+			Siblings:     siblings,
+			Dependencies: dependencies,
+			Files:        group,
+			AllFiles:     promptPaths,
+			Ignore:       p.cfg.Review.Ignore,
+			MaxBytes:     p.cfg.Review.MaxDiffBytes,
 		})
 		log.Debug("prompt built", "part", i+1, "of", len(groups), "files", len(prompt.Shown), "bytes", len(prompt.Text))
 		var res *review.Result
@@ -612,7 +617,7 @@ func (p *Poller) ReviewAt(ctx context.Context, repoCfg config.Repo, pull *github
 				}
 				continue
 			}
-			v, st, err := review.VerifyFinding(ctx, p.llm, repo, header, c, fileDiffs[c.Path], review.Limits{MaxToolCalls: 12, MaxOutput: p.cfg.Review.MaxOutput / 2, MaxContext: maxContext, Deadline: verifyDeadline, Changed: changed}, log.With("verify", c.Path))
+			v, st, err := review.VerifyFinding(ctx, p.llm, repo, header+"\n"+dependencies, c, fileDiffs[c.Path], review.Limits{MaxToolCalls: 12, MaxOutput: p.cfg.Review.MaxOutput / 2, MaxContext: maxContext, Deadline: verifyDeadline, Changed: changed}, log.With("verify", c.Path))
 			total.Merge(st)
 			if err != nil {
 				log.Warn("verification failed, keeping finding", "path", c.Path, "line", c.Line, "err", err)

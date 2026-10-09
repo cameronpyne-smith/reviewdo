@@ -23,7 +23,8 @@ each configured repository it:
    removes with where the repository uses that name, compares each changed
    file with its counterparts under sibling directories (environment
    overlays, sibling apps) and names the keys most of them set that this
-   file lacks, lets the model read
+   file lacks, lists the dependencies declared by the nearest manifests
+   with their versions, lets the model read
    the repository at the PR's head commit through read-only tools, and
    posts the result as a review: a
    verdict, a one-line summary, a findings list with each finding's
