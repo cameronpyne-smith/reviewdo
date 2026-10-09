@@ -140,6 +140,7 @@ See `deploy/config.example.json`. Fields:
 | `repos[].name` | | `owner/repo`, or `owner/*` for every repository the installation can reach; archived repositories are skipped and the list is refreshed every poll |
 | `instructions`, `instructions_file` | | global review guidance for every repo, inline or from a file |
 | `repos[].instructions`, `repos[].instructions_file` | | guidance for that repo only |
+| `exclude_repos` | | `owner/repo` names never polled, useful with `owner/*`; `review owner/repo#N` still works on them |
 | `ollama.model` | | required |
 | `ollama.num_ctx` | `32768` | context window requested from Ollama |
 | `ollama.num_predict` | `12288` | output tokens per model round, thinking included; stops runaway deliberation |

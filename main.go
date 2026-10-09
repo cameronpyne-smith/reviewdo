@@ -191,17 +191,20 @@ func check(ctx context.Context, cfgPath string) error {
 	var problems []error
 	for _, r := range a.cfg.Repos {
 		if r.Wildcard() {
-			n, archived := 0, 0
+			n, archived, excluded := 0, 0, 0
 			for _, ir := range repos {
 				if strings.EqualFold(strings.SplitN(ir.FullName, "/", 2)[0], strings.SplitN(r.Name, "/", 2)[0]) {
-					if ir.Archived {
+					switch {
+					case ir.Archived:
 						archived++
-					} else {
+					case a.cfg.Excluded(ir.FullName):
+						excluded++
+					default:
 						n++
 					}
 				}
 			}
-			fmt.Printf("repo:           %s matches %d repositories (%d archived, skipped)\n", r.Name, n, archived)
+			fmt.Printf("repo:           %s matches %d repositories (%d archived, %d excluded)\n", r.Name, n, archived, excluded)
 			if n == 0 {
 				problems = append(problems, fmt.Errorf("repo %s matches nothing", r.Name))
 			}

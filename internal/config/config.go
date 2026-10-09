@@ -37,6 +37,7 @@ type Config struct {
 	Instructions     string   `json:"instructions"`
 	InstructionsFile string   `json:"instructions_file"`
 	Repos            []Repo   `json:"repos"`
+	ExcludeRepos     []string `json:"exclude_repos"`
 	Ollama           Ollama   `json:"ollama"`
 	Review           Review   `json:"review"`
 }
@@ -65,8 +66,20 @@ func (c *Config) HasWildcard() bool {
 	return false
 }
 
+func (c *Config) Excluded(name string) bool {
+	for _, x := range c.ExcludeRepos {
+		if strings.EqualFold(x, name) {
+			return true
+		}
+	}
+	return false
+}
+
 func (c *Config) Resolve(installed []string) []Repo {
 	seen := map[string]bool{}
+	for _, x := range c.ExcludeRepos {
+		seen[strings.ToLower(x)] = true
+	}
 	var out []Repo
 	for _, r := range c.Repos {
 		if !r.Wildcard() && !seen[strings.ToLower(r.Name)] {
@@ -275,6 +288,11 @@ func (c *Config) validate() error {
 		owner, name, ok := strings.Cut(r.Name, "/")
 		if !ok || owner == "" || name == "" || strings.Contains(name, "/") {
 			errs = append(errs, fmt.Errorf("repo %q must be owner/name or owner/*", r.Name))
+		}
+	}
+	for _, x := range c.ExcludeRepos {
+		if strings.Count(x, "/") != 1 || strings.HasSuffix(x, "/*") {
+			errs = append(errs, fmt.Errorf("exclude_repos entry %q must be owner/name", x))
 		}
 	}
 	if c.Ollama.Model == "" {

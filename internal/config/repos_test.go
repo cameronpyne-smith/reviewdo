@@ -9,8 +9,8 @@ func TestResolveWildcard(t *testing.T) {
 	c := &Config{Repos: []Repo{
 		{Name: "org/explicit", Instructions: "special"},
 		{Name: "org/*", Instructions: "default"},
-	}}
-	got := c.Resolve([]string{"org/zeta", "Org/Explicit", "other/repo", "org/alpha"})
+	}, ExcludeRepos: []string{"org/Skipped"}}
+	got := c.Resolve([]string{"org/zeta", "Org/Explicit", "other/repo", "org/alpha", "org/skipped"})
 	want := []Repo{
 		{Name: "org/explicit", Instructions: "special"},
 		{Name: "org/alpha", Instructions: "default"},
