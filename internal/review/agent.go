@@ -402,13 +402,20 @@ func RunSingle(ctx context.Context, llm *ollama.Client, system, user string, sch
 		{Role: "system", Content: system},
 		{Role: "user", Content: user},
 	}
-	msg, u, err := llm.Chat(ctx, messages, nil, schema)
-	if err != nil {
-		return nil, st, err
+	var raw json.RawMessage
+	for _, client := range []*ollama.Client{llm, llm.WithLowThink(), llm.WithThink(false)} {
+		msg, u, err := client.Chat(ctx, messages, nil, schema)
+		if err != nil {
+			return nil, st, err
+		}
+		st.Usage.Add(u)
+		st.Rounds++
+		raw = json.RawMessage(extractJSON(msg.Content))
+		if !u.Truncated && json.Valid(raw) {
+			break
+		}
 	}
-	st.Usage.Add(u)
-	st.Rounds = 1
-	return json.RawMessage(extractJSON(msg.Content)), st, nil
+	return raw, st, nil
 }
 
 type Verdict struct {
