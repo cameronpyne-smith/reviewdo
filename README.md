@@ -14,6 +14,9 @@ each configured repository it:
 2. Scans new issue comments for `@reviewdo-bot review`.
 3. Reviews a PR when it is newly opened (or leaves draft), when a trusted
    member comments `@reviewdo-bot review`, or when the `reviewdo` label is added.
+   Requests by comment are reviewed first, then labels, then newly opened
+   PRs, oldest first; every repository is rescanned between reviews so a
+   new request never waits behind the backlog.
 4. Fetches the diff, lets the model read the repository at the PR's head
    commit through read-only tools, and posts the result as a review: a
    verdict, a one-line summary, a findings list with each finding's

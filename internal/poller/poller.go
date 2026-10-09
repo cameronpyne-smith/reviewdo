@@ -102,14 +102,62 @@ func (p *Poller) resolveRepos(ctx context.Context) []config.Repo {
 	return repos
 }
 
+type job struct {
+	repo config.Repo
+	pull github.Pull
+	tr   trigger
+	ps   *state.Pull
+}
+
+func (j job) key() string { return j.repo.Name + "#" + strconv.Itoa(j.pull.Number) }
+
+var reasonRank = map[string]int{"comment": 0, "label": 1, "opened": 2}
+
+func before(a, b job) bool {
+	if reasonRank[a.tr.reason] != reasonRank[b.tr.reason] {
+		return reasonRank[a.tr.reason] < reasonRank[b.tr.reason]
+	}
+	if !a.tr.at.Equal(b.tr.at) {
+		return a.tr.at.Before(b.tr.at)
+	}
+	return a.key() < b.key()
+}
+
 func (p *Poller) tick(ctx context.Context) {
-	for _, repo := range p.resolveRepos(ctx) {
+	queue := map[string]job{}
+	for {
 		if ctx.Err() != nil {
 			return
 		}
-		if err := p.pollRepo(ctx, repo); err != nil {
-			p.log.Error("poll failed", "repo", repo.Name, "err", err)
+		for _, repo := range p.resolveRepos(ctx) {
+			jobs, err := p.scanRepo(ctx, repo)
+			if err != nil {
+				p.log.Error("poll failed", "repo", repo.Name, "err", err)
+			}
+			for _, j := range jobs {
+				if q, ok := queue[j.key()]; !ok || q.pull.Head.SHA != j.pull.Head.SHA {
+					queue[j.key()] = j
+				}
+			}
 		}
+		if err := p.st.Save(p.cfg.StatePath); err != nil {
+			p.log.Error("save state failed", "err", err)
+		}
+		if len(queue) == 0 {
+			return
+		}
+		var next job
+		first := true
+		for _, j := range queue {
+			if first || before(j, next) {
+				next, first = j, false
+			}
+		}
+		delete(queue, next.key())
+		if len(queue) > 0 {
+			p.log.Info("review queue", "next", next.key(), "reason", next.tr.reason, "waiting", len(queue))
+		}
+		p.runJob(ctx, next)
 		if err := p.st.Save(p.cfg.StatePath); err != nil {
 			p.log.Error("save state failed", "err", err)
 		}
@@ -119,13 +167,14 @@ func (p *Poller) tick(ctx context.Context) {
 type trigger struct {
 	reason    string
 	commentID int64
+	at        time.Time
 }
 
-func (p *Poller) pollRepo(ctx context.Context, repo config.Repo) error {
+func (p *Poller) scanRepo(ctx context.Context, repo config.Repo) ([]job, error) {
 	log := p.log.With("repo", repo.Name)
 	pulls, err := p.gh.ListOpenPulls(ctx, repo.Name)
 	if err != nil {
-		return fmt.Errorf("list pulls: %w", err)
+		return nil, fmt.Errorf("list pulls: %w", err)
 	}
 	rs, known := p.st.Repo(repo.Name)
 	baseline := !known
@@ -152,10 +201,8 @@ func (p *Poller) pollRepo(ctx context.Context, repo config.Repo) error {
 		log.Error("comment scan failed", "err", err)
 	}
 
+	var jobs []job
 	for _, pull := range pulls {
-		if ctx.Err() != nil {
-			return ctx.Err()
-		}
 		key := strconv.Itoa(pull.Number)
 		ps := rs.Pulls[key]
 		if ps == nil {
@@ -169,43 +216,42 @@ func (p *Poller) pollRepo(ctx context.Context, repo config.Repo) error {
 		case triggers[pull.Number].commentID != 0:
 			tr = triggers[pull.Number]
 		case pull.HasLabel(p.cfg.Label) && ps.LabelSHA != pull.Head.SHA:
-			tr = trigger{reason: "label"}
+			tr = trigger{reason: "label", at: pull.UpdatedAt}
+			ps.LabelSHA = pull.Head.SHA
 		case ps.ReviewedSHA == "" && !ps.Baselined && !pull.Draft && ps.FailedSHA != pull.Head.SHA:
-			tr = trigger{reason: "opened"}
+			tr = trigger{reason: "opened", at: pull.CreatedAt}
 		default:
 			continue
 		}
+		jobs = append(jobs, job{repo: repo, pull: pull, tr: tr, ps: ps})
+	}
+	return jobs, nil
+}
 
-		if tr.reason == "label" {
-			ps.LabelSHA = pull.Head.SHA
-		}
-
-		plog := log.With("pr", pull.Number, "reason", tr.reason, "head", short(pull.Head.SHA))
-		plog.Info("reviewing")
-		start := time.Now()
-		err := p.Review(ctx, repo, &pull, ps.ReviewedSHA)
-		if ctx.Err() != nil {
-			plog.Info("review interrupted by shutdown; it will run again on the next start", "took", time.Since(start).Round(time.Second))
-			return ctx.Err()
-		}
-		if tr.reason == "label" && !p.DryRun {
-			if err := p.gh.RemoveLabel(ctx, repo.Name, pull.Number, p.cfg.Label); err != nil {
-				log.Warn("could not remove label; the app may need Issues write permission", "pr", pull.Number, "err", err)
-			}
-		}
-		if err != nil {
-			ps.FailedSHA = pull.Head.SHA
-			plog.Error("review failed; it will run again on a new commit, comment or label", "err", err)
-			continue
-		}
-		ps.ReviewedSHA = pull.Head.SHA
-		ps.ReviewedAt = time.Now()
-		plog.Info("review posted", "took", time.Since(start).Round(time.Second))
-		if err := p.st.Save(p.cfg.StatePath); err != nil {
-			log.Error("save state failed", "err", err)
+func (p *Poller) runJob(ctx context.Context, j job) {
+	pull, ps := j.pull, j.ps
+	log := p.log.With("repo", j.repo.Name)
+	plog := log.With("pr", pull.Number, "reason", j.tr.reason, "head", short(pull.Head.SHA))
+	plog.Info("reviewing")
+	start := time.Now()
+	err := p.Review(ctx, j.repo, &pull, ps.ReviewedSHA)
+	if ctx.Err() != nil {
+		plog.Info("review interrupted by shutdown; it will run again on the next start", "took", time.Since(start).Round(time.Second))
+		return
+	}
+	if j.tr.reason == "label" && !p.DryRun {
+		if err := p.gh.RemoveLabel(ctx, j.repo.Name, pull.Number, p.cfg.Label); err != nil {
+			log.Warn("could not remove label; the app may need Issues write permission", "pr", pull.Number, "err", err)
 		}
 	}
-	return nil
+	if err != nil {
+		ps.FailedSHA = pull.Head.SHA
+		plog.Error("review failed; it will run again on a new commit, comment or label", "err", err)
+		return
+	}
+	ps.ReviewedSHA = pull.Head.SHA
+	ps.ReviewedAt = time.Now()
+	plog.Info("review posted", "took", time.Since(start).Round(time.Second))
 }
 
 func (p *Poller) commentTriggers(ctx context.Context, repo string, rs *state.Repo, open map[int]*github.Pull) (map[int]trigger, error) {
@@ -233,7 +279,7 @@ func (p *Poller) commentTriggers(ctx context.Context, repo string, rs *state.Rep
 			p.log.Warn("ignoring review request from untrusted commenter on a public repository", "repo", repo, "pr", n, "user", c.User.Login, "association", c.AuthorAssociation)
 			continue
 		}
-		out[n] = trigger{reason: "comment", commentID: c.ID}
+		out[n] = trigger{reason: "comment", commentID: c.ID, at: c.CreatedAt}
 		if !p.DryRun {
 			if err := p.gh.ReactToComment(ctx, repo, c.ID, "eyes"); err != nil {
 				p.log.Warn("could not react to comment", "repo", repo, "pr", n, "err", err)
