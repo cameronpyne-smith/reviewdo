@@ -37,10 +37,10 @@ automatically. Use a comment or the label to review them.
 
 - Outbound HTTPS to `api.github.com` and `github.com` (git fetch) and HTTP to
   `127.0.0.1:11434` only. Nothing listens.
-- The model's tools are `read_file`, `list_dir` and `search`, all served by
-  `git show`, `git ls-tree` and `git grep` at the PR head commit. Nothing from
-  the repository is ever executed: no hooks, no builds, no tests, no
-  submodules.
+- The model's tools are `read_file`, `list_dir`, `search` and `search_base`,
+  all served by `git show`, `git ls-tree` and `git grep` at the PR head
+  commit or the base branch. Nothing from the repository is ever executed:
+  no hooks, no builds, no tests, no submodules.
 - Git runs with system and global config disabled and no credential helper.
   The installation token is passed per command through the environment and is
   never written to the clone.
@@ -50,7 +50,7 @@ automatically. Use a comment or the label to review them.
 - The service runs as a `DynamicUser` with a locked-down systemd sandbox
   (`deploy/reviewdo.service`).
 - PR content is untrusted. The model only produces JSON that becomes review
-  text; it has no tools and executes nothing.
+  text; its tools are read-only and it executes nothing.
 - Review requests via comment are honoured only from `OWNER`, `MEMBER` or
   `COLLABORATOR` accounts.
 
@@ -81,21 +81,33 @@ reviewdo -config config.json run                         # poll loop (default)
 Copilot comments the authors already replied to. Every reply says whether the
 finding was real, so the labels come for free. The data lives in `bench/`
 (gitignored, it quotes your code) and the review runs at the commit Copilot
-reviewed, so the same bugs are present.
+reviewed, against the PR's base at the time, so the same bugs are present.
 
 ```
-reviewdo -config config.json bench mine -authors me,colleague   # collect reviewed PRs
-reviewdo -config config.json bench label                         # label findings from replies
-reviewdo bench propose -since 2026-07-01 -n 10 -write            # pick a smoke set
-reviewdo -config config.json bench run -label baseline           # review and score the set
-reviewdo bench report -label baseline -against tweak             # compare two runs
+reviewdo -config config.json bench mine -authors me,colleague [-org o]   # collect reviewed PRs into pool/
+reviewdo -config config.json bench label [-since 2026-07-01] [-only r#N]  # label findings into golden/
+reviewdo bench propose -since 2026-07-01 -n 10 -write                      # pick a smoke set
+reviewdo -config config.json bench run -label base [-model m -think t]     # review and score the set
+reviewdo -config config.json bench score -label base                       # rescore without reviewing
+reviewdo bench report -label tweak -against base                           # compare two runs
 ```
 
-Scoring pairs each golden finding with a review comment using the local model
-as a judge, cross-checked by a same-file-within-five-lines match. The report
-gives recall on valid findings, how many rejected Copilot findings were
-repeated, and the comments that matched nothing, which `runs/<label>/triage.md`
-lists for checking by hand.
+Labelling: a thread with no reply is `unclear`; a reply that references a
+commit is `valid`; otherwise the model reads the reply and decides `valid`,
+`invalid` or `unclear`. Verdicts can be fixed by hand in the golden file
+with `"locked": true`, and reviewdo's own findings can be added there with
+`"source": "reviewdo"` once checked, so later runs are scored against them
+too.
+
+`bench run` clones into `bench/clones`, reviews each PR in the set
+sequentially with the configured budget (`-budget` overrides it), skips PRs
+already in `runs/<label>/`, then scores. Scoring pairs each golden finding
+with a review comment using the local model as a judge, cross-checked by a
+same-file-within-five-lines match. The report gives recall on valid
+findings, how many rejected Copilot findings were repeated, time and tool
+calls per PR, and the comments that matched nothing, which
+`runs/<label>/triage.md` lists for checking by hand. There is no pass/fail
+gate; compare runs.
 
 ## Review guidance
 
