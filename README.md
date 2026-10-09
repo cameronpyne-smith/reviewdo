@@ -15,8 +15,10 @@ each configured repository it:
 3. Reviews a PR when it is newly opened (or leaves draft), when a trusted
    member comments `@reviewdo-bot review`, or when the `reviewdo` label is added.
 4. Fetches the diff, lets the model read the repository at the PR's head
-   commit through read-only tools, and posts the result as a review with
-   inline comments.
+   commit through read-only tools, and posts the result as a review: a
+   verdict, a one-line summary, a findings list with each finding's
+   severity and title linked to its inline comment, and a collapsed table
+   of what changed.
 
 With `clone_dir` set, each configured repository is cloned there on first
 use and the PR head is fetched before every review. `reviewdo clone` clones

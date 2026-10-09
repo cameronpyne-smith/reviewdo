@@ -290,14 +290,36 @@ func (p *Poller) Review(ctx context.Context, repoCfg config.Repo, pull *github.P
 	if github.IsStatus(err, http.StatusUnprocessableEntity) && len(out.Comments) > 0 {
 		log.Warn("inline comments rejected, posting them in the review body", "err", err)
 		req.Comments = nil
-		req.Body = review.FoldComments(out)
+		req.Body = out.Linked(nil, true)
 		rv, err = p.gh.CreateReview(ctx, repoCfg.Name, pull.Number, req)
 	}
 	if err != nil {
 		return fmt.Errorf("post review: %w", err)
 	}
 	log.Info("review url", "url", rv.HTMLURL, "inline", len(req.Comments))
+	if len(req.Comments) > 0 {
+		if err := p.linkFindings(ctx, repoCfg.Name, pull.Number, rv.ID, out); err != nil {
+			log.Warn("could not link findings to inline comments", "err", err)
+		}
+	}
 	return nil
+}
+
+func (p *Poller) linkFindings(ctx context.Context, repo string, number int, reviewID int64, out review.Output) error {
+	comments, err := p.gh.ListReviewComments(ctx, repo, number)
+	if err != nil {
+		return err
+	}
+	ids := map[string]int64{}
+	for _, c := range comments {
+		if c.PullRequestReviewID == reviewID {
+			ids[fmt.Sprintf("%s:%d", c.Path, c.Line)] = c.ID
+		}
+	}
+	if len(ids) == 0 {
+		return errors.New("no comments found for the review")
+	}
+	return p.gh.UpdateReview(ctx, repo, number, reviewID, out.Linked(ids, false))
 }
 
 func mustRead(group []*diff.File, ignore []string, max int) []string {

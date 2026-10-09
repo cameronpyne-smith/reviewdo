@@ -424,6 +424,11 @@ func (c *Client) CreateReview(ctx context.Context, repo string, number int, req 
 	return &out, nil
 }
 
+func (c *Client) UpdateReview(ctx context.Context, repo string, number int, reviewID int64, body string) error {
+	path := fmt.Sprintf("/repos/%s/pulls/%d/reviews/%d", repo, number, reviewID)
+	return c.do(ctx, http.MethodPut, path, acceptJSON, map[string]string{"body": body}, nil)
+}
+
 type PullReview struct {
 	ID          int64     `json:"id"`
 	Body        string    `json:"body"`
