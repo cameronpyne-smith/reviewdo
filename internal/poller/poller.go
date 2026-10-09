@@ -432,13 +432,26 @@ func (p *Poller) ReviewAt(ctx context.Context, repoCfg config.Repo, pull *github
 	var rejected []review.Comment
 	adjusted := false
 
+	if p.cfg.Review.Triage != nil && *p.cfg.Review.Triage && len(res.Comments) > 0 {
+		t, st, err := review.Triage(ctx, p.llm, header, res.Comments)
+		total.Merge(st)
+		if err != nil {
+			log.Warn("triage failed, keeping all findings", "err", err)
+		}
+		for i, c := range t.Dropped {
+			log.Info("triage dropped finding", "path", c.Path, "line", c.Line, "severity", c.Severity, "reason", t.Reasons[i])
+		}
+		log.Info("triaged", "kept", len(t.Kept), "dropped", len(t.Dropped), "took", st.Duration.Round(time.Second))
+		res.Comments = t.Kept
+		rejected = append(rejected, t.Dropped...)
+	}
+
 	if repo != nil && p.cfg.Review.Verify != nil && *p.cfg.Review.Verify {
 		fileDiffs := map[string]string{}
 		for _, f := range files {
 			fileDiffs[f.Path] = f.Render()
 		}
 		var kept []review.Comment
-		rejected = nil
 		unverified := 0
 		verifyDeadline := start.Add(budget)
 		if floor := time.Now().Add(reserve); floor.After(verifyDeadline) {

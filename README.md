@@ -25,9 +25,11 @@ with `git show <sha>:<path>`, so nothing is ever checked out and the working
 tree can be used normally. Without `clone_dir`, reviews use the diff alone.
 
 Large pull requests are reviewed in parts of related files, each with full
-tool access, then merged. Every Critical or Major finding is re-checked by a
-separate, sceptical verification pass against the files before it is posted;
-rejected findings are dropped and overstated ones downgraded.
+tool access, then merged. A triage pass drops findings that say nothing
+concrete: reassurance, requests to "please verify", generic advice. Every
+remaining Critical or Major finding is re-checked by a separate, sceptical
+verification pass against the files before it is posted; rejected findings
+are dropped and overstated ones downgraded.
 
 Re-reviews after a previous review only cover the commits added since then,
 unless history was rewritten or the base branch was merged in, in which case
@@ -146,6 +148,7 @@ See `deploy/config.example.json`. Fields:
 | `review.max_comments` | `15` | inline comments per review, highest severity first |
 | `review.part_bytes` | `40000` | diff bytes per review part; larger PRs are split into parts |
 | `review.part_time` | `2m` | minimum time for each part, so a large PR is read properly even when it overruns the budget |
+| `review.triage` | `true` | drop findings that say nothing concrete (reassurance, "please verify", generic advice) with one fast model call before verification |
 | `review.verify` | `true` | verify Critical and Major findings with a second pass before posting |
 | `review.time_budget` | `5m` | target duration for one review; parts and verification are cut short to fit |
 | `review.timeout` | `3 × time_budget` | hard deadline, after which the review is abandoned |

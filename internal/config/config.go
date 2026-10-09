@@ -123,6 +123,7 @@ type Review struct {
 	MaxOutput    int      `json:"max_output_tokens"`
 	PartBytes    int      `json:"part_bytes"`
 	PartTime     Duration `json:"part_time"`
+	Triage       *bool    `json:"triage"`
 	Verify       *bool    `json:"verify"`
 	TimeBudget   Duration `json:"time_budget"`
 	Timeout      Duration `json:"timeout"`
@@ -198,6 +199,10 @@ func (c *Config) applyDefaults() error {
 	}
 	if c.Review.PartTime.Duration == 0 {
 		c.Review.PartTime.Duration = 2 * time.Minute
+	}
+	if c.Review.Triage == nil {
+		v := true
+		c.Review.Triage = &v
 	}
 	if c.Review.Verify == nil {
 		v := true
