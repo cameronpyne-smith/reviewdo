@@ -439,6 +439,16 @@ func (p *Poller) ReviewAt(ctx context.Context, repoCfg config.Repo, pull *github
 	var rejected []review.Comment
 	adjusted := false
 
+	if len(res.Comments) > 0 {
+		var reader review.Repo
+		if repo != nil {
+			reader = repo
+		}
+		kept, dropped := review.Anchor(ctx, reader, files, res.Comments, log)
+		res.Comments = kept
+		rejected = append(rejected, dropped...)
+	}
+
 	if p.cfg.Review.Triage != nil && *p.cfg.Review.Triage && len(res.Comments) > 0 {
 		t, st, err := review.Triage(ctx, p.llm, header, res.Comments)
 		total.Merge(st)

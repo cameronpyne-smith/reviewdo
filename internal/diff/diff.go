@@ -43,6 +43,18 @@ func (f *File) Changes() (added, removed int) {
 	return
 }
 
+func (f *File) RightText() map[int]string {
+	m := map[int]string{}
+	for _, h := range f.Hunks {
+		for _, l := range h.Lines {
+			if l.NewNo > 0 {
+				m[l.NewNo] = l.Text
+			}
+		}
+	}
+	return m
+}
+
 func (f *File) RightLines() map[int]bool {
 	m := map[int]bool{}
 	for _, h := range f.Hunks {
