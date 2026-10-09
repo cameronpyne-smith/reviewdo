@@ -57,8 +57,8 @@ func Hollow(body string) bool {
 }
 
 type Triaged struct {
-	Kept    []Comment
-	Dropped []Comment
+	Kept     []Comment
+	Dropped  []Comment
 	Reasons  []string
 	Rerated  int
 	Reworded int
