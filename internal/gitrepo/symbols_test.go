@@ -80,3 +80,14 @@ func TestOutline(t *testing.T) {
 		}
 	}
 }
+
+func TestFormatGrepTruncatesLongLines(t *testing.T) {
+	long := "abc:web/dist/app.min.js:1:" + strings.Repeat("x", 300000)
+	out := formatGrep(long+"\nabc:a.ts:3:short\n", "abc:")
+	if len(out) > maxGrepLine+100 {
+		t.Errorf("output not truncated: %d bytes", len(out))
+	}
+	if !strings.HasPrefix(out, "web/dist/app.min.js:1:xxx") || !strings.Contains(out, "a.ts:3:short") {
+		t.Errorf("unexpected output: %.80q", out)
+	}
+}

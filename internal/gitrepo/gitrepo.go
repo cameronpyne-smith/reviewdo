@@ -22,6 +22,7 @@ const (
 	maxListLines = 500
 	maxGrepLines = 200
 	maxGrepBytes = 24 << 10
+	maxGrepLine  = 400
 )
 
 type TokenFunc func(ctx context.Context) (string, error)
@@ -283,25 +284,28 @@ func (r *Repo) SearchAt(ctx context.Context, ref, pattern, p string) (string, er
 		}
 		return "", err
 	}
-	prefix := ref + ":"
+	return formatGrep(string(out), ref+":"), nil
+}
+
+func formatGrep(out, prefix string) string {
 	var b strings.Builder
 	n := 0
-	for _, l := range strings.Split(strings.TrimRight(string(out), "\n"), "\n") {
+	for _, l := range strings.Split(strings.TrimRight(out, "\n"), "\n") {
 		if l == "" {
 			continue
 		}
-		if n >= maxGrepLines || b.Len() > maxGrepBytes {
+		if n >= maxGrepLines || b.Len() >= maxGrepBytes {
 			b.WriteString("[more matches omitted, narrow the pattern or path]\n")
 			break
 		}
-		b.WriteString(strings.TrimPrefix(l, prefix))
+		b.WriteString(truncateLine(strings.TrimPrefix(l, prefix), maxGrepLine))
 		b.WriteString("\n")
 		n++
 	}
 	if b.Len() == 0 {
-		return "(no matches)\n", nil
+		return "(no matches)\n"
 	}
-	return b.String(), nil
+	return b.String()
 }
 
 func Open(dir, head, base string) *Repo {
