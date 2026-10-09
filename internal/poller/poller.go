@@ -466,7 +466,7 @@ func (p *Poller) ReviewAt(ctx context.Context, repoCfg config.Repo, pull *github
 		for i, c := range t.Dropped {
 			log.Info("triage dropped finding", "path", c.Path, "line", c.Line, "severity", c.Severity, "reason", t.Reasons[i])
 		}
-		log.Info("triaged", "kept", len(t.Kept), "dropped", len(t.Dropped), "rerated", t.Rerated, "took", st.Duration.Round(time.Second))
+		log.Info("triaged", "kept", len(t.Kept), "dropped", len(t.Dropped), "rerated", t.Rerated, "reworded", t.Reworded, "took", st.Duration.Round(time.Second))
 		res.Comments = t.Kept
 		rejected = append(rejected, t.Dropped...)
 	}

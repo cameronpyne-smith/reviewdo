@@ -18,13 +18,16 @@ Drop a finding when it:
 - is generic advice that would apply to any codebase and is not tied to something specific in this change;
 - praises, restates the description, or suggests an optional alternative with no concrete downside to the current code;
 - is about formatting, whitespace, naming preference or anything a linter would catch;
-- is the same issue as another finding at the same place.
+- is the same issue as another finding at the same place;
+- rests on how a library, client or broker behaves (what a method throws, which interface a type implements, what happens on failure) without pointing at evidence in this repository.
+
+A kept finding's body must speak to the author about the code. If it narrates what the reviewer did ("I searched", "I could not find", "the tools show"), keep the finding but set "body" to the same finding with that narration removed; otherwise omit "body".
 
 Keep every finding that names a concrete problem at a concrete place, including the same issue reported at several places, and including anything you are unsure about. Keep is the default.
 
 For each kept finding also set its severity from these definitions, ignoring the draft's own: critical means it will certainly break, lose data or open a security hole; major means a likely bug, or a clear mismatch between what the change says and what it does, or a stale statement that will mislead whoever relies on it; minor means worth fixing but not blocking; nit means optional. When unsure between two, choose the lower.
 
-Respond with JSON only: {"decisions":[{"id":"F1","keep":true,"severity":"minor","reason":"one short sentence"}]} with one decision per finding.`
+Respond with JSON only: {"decisions":[{"id":"F1","keep":true,"severity":"minor","reason":"one short sentence","body":"only when rewritten"}]} with one decision per finding.`
 
 var TriageSchema = json.RawMessage(`{
   "type": "object",
@@ -37,7 +40,8 @@ var TriageSchema = json.RawMessage(`{
           "id": {"type": "string"},
           "keep": {"type": "boolean"},
           "severity": {"type": "string", "enum": ["critical", "major", "minor", "nit"]},
-          "reason": {"type": "string"}
+          "reason": {"type": "string"},
+          "body": {"type": "string"}
         },
         "required": ["id", "keep", "severity", "reason"]
       }
@@ -55,8 +59,9 @@ func Hollow(body string) bool {
 type Triaged struct {
 	Kept    []Comment
 	Dropped []Comment
-	Reasons []string
-	Rerated int
+	Reasons  []string
+	Rerated  int
+	Reworded int
 }
 
 func TriageInput(header string, comments []Comment) string {
@@ -94,6 +99,7 @@ func Triage(ctx context.Context, llm *ollama.Client, header string, comments []C
 			Keep     bool   `json:"keep"`
 			Severity string `json:"severity"`
 			Reason   string `json:"reason"`
+			Body     string `json:"body"`
 		} `json:"decisions"`
 	}
 	if err := json.Unmarshal(raw, &out); err != nil {
@@ -102,12 +108,18 @@ func Triage(ctx context.Context, llm *ollama.Client, header string, comments []C
 	}
 	drop := map[string]string{}
 	severity := map[string]string{}
+	bodies := map[string]string{}
 	for _, d := range out.Decisions {
 		id := strings.ToUpper(strings.TrimSpace(d.ID))
 		if !d.Keep {
 			drop[id] = d.Reason
-		} else if _, ok := severityRank[d.Severity]; ok {
+			continue
+		}
+		if _, ok := severityRank[d.Severity]; ok {
 			severity[id] = d.Severity
+		}
+		if b := strings.TrimSpace(d.Body); b != "" {
+			bodies[id] = b
 		}
 	}
 	for i, c := range candidates {
@@ -120,6 +132,10 @@ func Triage(ctx context.Context, llm *ollama.Client, header string, comments []C
 		if sev, ok := severity[id]; ok && sev != c.Severity {
 			t.Rerated++
 			c.Severity = sev
+		}
+		if b, ok := bodies[id]; ok && b != strings.TrimSpace(c.Body) {
+			t.Reworded++
+			c.Body = b
 		}
 		t.Kept = append(t.Kept, c)
 	}
