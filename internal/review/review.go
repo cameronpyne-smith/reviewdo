@@ -336,8 +336,12 @@ func verdict(res *Result) string {
 	if _, ok := verdictRank[v]; !ok {
 		v = "caution"
 	}
-	critical := false
+	critical, findings := false, 0
 	for _, c := range res.Comments {
+		if strings.TrimSpace(c.Body) == "" {
+			continue
+		}
+		findings++
 		switch c.Severity {
 		case "critical":
 			critical = true
@@ -349,6 +353,9 @@ func verdict(res *Result) string {
 	}
 	if critical {
 		return "blocked"
+	}
+	if findings == 0 && res.Unverified == 0 {
+		return "ready"
 	}
 	if v == "blocked" {
 		return "caution"
