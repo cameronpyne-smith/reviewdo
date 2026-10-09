@@ -32,6 +32,10 @@ func TestRenderFindingsSection(t *testing.T) {
 			t.Errorf("body missing %q:\n%s", want, out.Body)
 		}
 	}
+	bare := Render(&Result{Summary: "s"}, files, Scope{ToSHA: "abc1234"}, 15, "b", "l")
+	if !strings.Contains(bare.Body, "| `a.cs` | +1 −0 |") {
+		t.Errorf("expected file-name fallback rows:\n%s", bare.Body)
+	}
 	if strings.Contains(out.Body, "Inline body.") {
 		t.Errorf("inline body should not be in the review body:\n%s", out.Body)
 	}

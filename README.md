@@ -32,9 +32,11 @@ tree can be used normally. Without `clone_dir`, reviews use the diff alone.
 Large pull requests are reviewed in parts of related files, each with full
 tool access, then merged. A triage pass drops findings that say nothing
 concrete: reassurance, requests to "please verify", generic advice. Every
-remaining Critical or Major finding is re-checked by a separate, sceptical
-verification pass against the files before it is posted; rejected findings
-are dropped and overstated ones downgraded.
+remaining finding is re-checked by a separate, sceptical verification pass
+against the files before it is posted, highest severity first; rejected
+findings are dropped and overstated ones downgraded. When the time reserve
+runs out, unchecked Critical and Major findings are reported as unverified
+and unchecked Minor ones are dropped.
 
 Re-reviews after a previous review only cover the commits added since then,
 unless history was rewritten or the base branch was merged in, in which case
@@ -160,7 +162,7 @@ See `deploy/config.example.json`. Fields:
 | `review.part_bytes` | `40000` | diff bytes per review part; larger PRs are split into parts |
 | `review.part_time` | `2m` | minimum time for each part, so a large PR is read properly even when it overruns the budget |
 | `review.triage` | `true` | one fast model call before verification that drops findings which say nothing concrete (reassurance, "please verify", generic advice) and sets each finding's severity from fixed definitions |
-| `review.verify` | `true` | verify Critical and Major findings with a second pass before posting |
+| `review.verify` | `true` | verify every finding with a second pass before posting, highest severity first |
 | `review.time_budget` | `5m` | target duration for one review; parts and verification are cut short to fit |
 | `review.timeout` | `3 × time_budget` | hard deadline, after which the review is abandoned |
 | `review.max_output_tokens` | `48000` | total output tokens per review before the final answer is forced |

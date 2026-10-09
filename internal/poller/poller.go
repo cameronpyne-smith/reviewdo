@@ -559,14 +559,15 @@ func (p *Poller) ReviewAt(ctx context.Context, repoCfg config.Repo, pull *github
 			verifyDeadline = hard
 		}
 		verifyDeadline = verifyDeadline.Add(-20 * time.Second)
+		review.SortBySeverity(res.Comments)
 		for _, c := range res.Comments {
-			if c.Severity != "critical" && c.Severity != "major" {
-				kept = append(kept, c)
-				continue
-			}
 			if time.Now().After(verifyDeadline) {
-				log.Warn("no time left to verify, dropping", "path", c.Path, "line", c.Line, "was", c.Severity)
-				unverified++
+				if c.Severity == "critical" || c.Severity == "major" {
+					log.Warn("no time left to verify, dropping", "path", c.Path, "line", c.Line, "was", c.Severity)
+					unverified++
+				} else {
+					log.Info("no time left to verify, dropping", "path", c.Path, "line", c.Line, "was", c.Severity)
+				}
 				continue
 			}
 			v, st, err := review.VerifyFinding(ctx, p.llm, repo, header, c, fileDiffs[c.Path], review.Limits{MaxToolCalls: 12, MaxOutput: p.cfg.Review.MaxOutput / 2, MaxContext: maxContext, Deadline: verifyDeadline}, log.With("verify", c.Path))

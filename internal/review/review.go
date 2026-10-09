@@ -338,6 +338,20 @@ func Groups(files []*diff.File, ignore []string, maxBytes int) [][]*diff.File {
 
 var severityRank = map[string]int{"critical": 0, "major": 1, "minor": 2, "nit": 3}
 
+func SortBySeverity(comments []Comment) {
+	sort.SliceStable(comments, func(i, j int) bool {
+		ri, ok := severityRank[comments[i].Severity]
+		if !ok {
+			ri = severityRank["minor"]
+		}
+		rj, ok := severityRank[comments[j].Severity]
+		if !ok {
+			rj = severityRank["minor"]
+		}
+		return ri < rj
+	})
+}
+
 var verdictRank = map[string]int{"ready": 0, "caution": 1, "blocked": 2}
 
 var verdictLabel = map[string]string{
@@ -479,6 +493,9 @@ func Render(res *Result, files []*diff.File, scope Scope, maxComments int, botSl
 		}
 		rows = append(rows, fmt.Sprintf("| `%s` | %s |", p, strings.ReplaceAll(d, "|", "\\|")))
 	}
+	if len(rows) == 0 {
+		rows = fileRows(files)
+	}
 	if len(rows) > 0 {
 		t.WriteString("\n<details>\n<summary><strong>What changed</strong></summary>\n\n| File | Change |\n| --- | --- |\n")
 		t.WriteString(strings.Join(rows, "\n"))
@@ -488,6 +505,42 @@ func Render(res *Result, files []*diff.File, scope Scope, maxComments int, botSl
 	out.tail = t.String()
 	out.Body = out.Linked(nil, false)
 	return out
+}
+
+func fileRows(files []*diff.File) []string {
+	var rows []string
+	for i, f := range files {
+		if i >= 40 {
+			rows = append(rows, fmt.Sprintf("| … | %d more files |", len(files)-i))
+			break
+		}
+		added, removed := 0, 0
+		for _, h := range f.Hunks {
+			for _, l := range h.Lines {
+				switch l.Kind {
+				case '+':
+					added++
+				case '-':
+					removed++
+				}
+			}
+		}
+		var d string
+		switch {
+		case f.Binary:
+			d = "binary"
+		case f.Added:
+			d = fmt.Sprintf("added, %d lines", added)
+		case f.Deleted:
+			d = "deleted"
+		case f.Renamed && f.OldPath != "":
+			d = fmt.Sprintf("renamed from `%s`, +%d −%d", f.OldPath, added, removed)
+		default:
+			d = fmt.Sprintf("+%d −%d", added, removed)
+		}
+		rows = append(rows, fmt.Sprintf("| `%s` | %s |", f.Path, d))
+	}
+	return rows
 }
 
 func (o Output) Linked(ids map[string]int64, fold bool) string {
