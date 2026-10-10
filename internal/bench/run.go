@@ -56,6 +56,7 @@ type RunOptions struct {
 	Set    string
 	Label  string
 	Only   string
+	Units  []string
 	Budget time.Duration
 }
 
@@ -75,6 +76,7 @@ func Run(ctx context.Context, cfg *config.Config, gh *github.Client, llm *ollama
 		bcfg.Review.Timeout.Duration = 3 * opt.Budget
 	}
 	p := poller.New(&bcfg, gh, llm, nil, false, slug, log)
+	p.Units = opt.Units
 	p.DryRun = true
 	for _, e := range set {
 		ref := fmt.Sprintf("%s#%d", e.Repo, e.Number)

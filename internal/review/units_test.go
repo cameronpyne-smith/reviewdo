@@ -60,7 +60,7 @@ func TestUnitsSplitsAtFunctionsAndMarksChanges(t *testing.T) {
 		{Kind: '+', Text: "\treturn fmt.Sprintf(\"%s!\", b)", NewNo: 13},
 		{Kind: ' ', Text: "}", NewNo: 14},
 	}}}}
-	units := Units(context.Background(), repo, []*diff.File{f}, nil)
+	units := Units(context.Background(), repo, []*diff.File{f}, nil, nil)
 	if len(units) != 1 {
 		t.Fatalf("want 1 unit, got %d: %+v", len(units), units)
 	}
@@ -84,7 +84,7 @@ func TestUnitsSkipsTestsAndNonCode(t *testing.T) {
 	for p := range repo.treeRepo {
 		files = append(files, &diff.File{Path: p, Hunks: []diff.Hunk{{Lines: []diff.Line{{Kind: '+', Text: "x", NewNo: 1}}}}})
 	}
-	if units := Units(context.Background(), repo, files, nil); len(units) != 0 {
+	if units := Units(context.Background(), repo, files, nil, nil); len(units) != 0 {
 		t.Errorf("expected no units, got %d", len(units))
 	}
 }

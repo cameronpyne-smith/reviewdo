@@ -23,7 +23,7 @@ Commands:
   label [-since d] [-relabel]      build golden files and label Copilot findings from the author's replies
   propose [-since d] [-n 10] [-include owner/repo#N,...] [-write]
                                    propose a smoke set from the labelled pool
-  run -label l [-set smoke.json] [-only owner/repo#N] [-budget d] [-model m] [-think v]
+  run -label l [-set smoke.json] [-only owner/repo#N] [-units path:line,...] [-budget d] [-model m] [-think v]
                                    review every PR in the set at the commit Copilot reviewed
   score -label l                   score a run against the golden files
   report -label l [-against l2]    print a run's score, optionally beside another run
@@ -177,6 +177,7 @@ func benchRun(ctx context.Context, cfgPath string, dir bench.Dir, args []string,
 	set := fs.String("set", "smoke.json", "set file under the bench directory")
 	only := fs.String("only", "", "only this PR (owner/repo#N)")
 	budget := fs.Duration("budget", 0, "override review.time_budget")
+	units := fs.String("units", "", "deep pass only, on the functions containing these path:line entries")
 	model, think := llmFlags(fs)
 	fs.Parse(args)
 	if *label == "" {
@@ -187,7 +188,7 @@ func benchRun(ctx context.Context, cfgPath string, dir bench.Dir, args []string,
 		return err
 	}
 	llm := withOverrides(a, *model, *think)
-	if err := bench.Run(ctx, a.cfg, a.gh, llm, dir, a.slug, bench.RunOptions{Set: *set, Label: *label, Only: *only, Budget: *budget}, log); err != nil {
+	if err := bench.Run(ctx, a.cfg, a.gh, llm, dir, a.slug, bench.RunOptions{Set: *set, Label: *label, Only: *only, Units: splitList(*units), Budget: *budget}, log); err != nil {
 		return err
 	}
 	sc, err := bench.ScoreRun(ctx, llm, dir, *label, log)
@@ -240,4 +241,14 @@ func benchReport(dir bench.Dir, args []string) error {
 	}
 	bench.PrintCompare(os.Stdout, sc, other)
 	return nil
+}
+
+func splitList(s string) []string {
+	var out []string
+	for _, p := range strings.Split(s, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }

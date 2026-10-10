@@ -37,6 +37,7 @@ type Poller struct {
 	repos    []config.Repo
 	private  map[string]bool
 	DryRun   bool
+	Units    []string
 }
 
 var trustedAssociations = map[string]bool{"OWNER": true, "MEMBER": true, "COLLABORATOR": true}
@@ -432,7 +433,7 @@ func (p *Poller) Facts(ctx context.Context, repoCfg config.Repo, pull *github.Pu
 	start := time.Now()
 	sets := review.SiblingSets(ctx, repo, files)
 	checks, timing := review.Checks(ctx, repo, files, sets)
-	units := review.Units(ctx, repo, files, p.cfg.Review.Ignore)
+	units := review.Units(ctx, repo, files, p.cfg.Review.Ignore, nil)
 	var b strings.Builder
 	for _, s := range []string{review.Symbols(ctx, repo, files), review.Siblings(ctx, repo, files, sets), review.Dependencies(ctx, repo, files), checks, review.DescribeUnits(units, review.PackUnits(units, 10<<10))} {
 		if s != "" {
@@ -517,7 +518,7 @@ func (p *Poller) ReviewAt(ctx context.Context, repoCfg config.Repo, pull *github
 	start := time.Now()
 	budget := p.cfg.Review.TimeBudget.Duration
 	reserve := budget * 2 / 5
-	deep := repo != nil && p.cfg.Review.Units != nil && *p.cfg.Review.Units
+	deep := repo != nil && (len(p.Units) > 0 || p.cfg.Review.Units != nil && *p.cfg.Review.Units)
 	finder := budget - reserve
 	if deep {
 		finder /= 2
@@ -529,6 +530,9 @@ func (p *Poller) ReviewAt(ctx context.Context, repoCfg config.Repo, pull *github
 	}
 	skipped := 0
 	for i, group := range groups {
+		if len(p.Units) > 0 {
+			break
+		}
 		partStart := time.Now()
 		if i > 0 && partStart.After(hard.Add(-reserve-20*time.Second)) {
 			skipped = len(groups) - i
@@ -593,7 +597,7 @@ func (p *Poller) ReviewAt(ctx context.Context, repoCfg config.Repo, pull *github
 		log.Info("part reviewed", "part", i+1, "of", len(groups), "verdict", res.Verdict, "findings", len(res.Comments), "rounds", st.Rounds, "tool_calls", st.ToolCalls, "took", st.Duration.Round(time.Second))
 		parts = append(parts, res)
 	}
-	if len(parts) == 0 {
+	if len(parts) == 0 && len(p.Units) == 0 {
 		return nil, errors.New("every part of the review failed")
 	}
 	res := review.Merge(parts)
@@ -611,7 +615,7 @@ func (p *Poller) ReviewAt(ctx context.Context, repoCfg config.Repo, pull *github
 		}
 		deadline = deadline.Add(-20 * time.Second)
 		deepStart := time.Now()
-		units := review.Units(ctx, repo, promptFiles, p.cfg.Review.Ignore)
+		units := review.Units(ctx, repo, promptFiles, p.cfg.Review.Ignore, p.Units)
 		oc := review.ReviewUnits(ctx, p.llm, repo, header, units, review.Limits{MaxOutput: p.cfg.Review.MaxOutput / 3, MaxContext: maxContext, Changed: review.ChangedSpans(files)}, deadline, log)
 		total.Merge(oc.Stats)
 		var added int

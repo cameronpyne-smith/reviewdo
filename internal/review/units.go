@@ -24,7 +24,7 @@ Report only what you can show from the code. Each finding names the input or seq
 
 Severity: critical means it will certainly break, lose data or open a security hole; major means a likely bug; minor means worth fixing but not blocking; nit means optional. When unsure between two severities, choose the lower.
 
-You have read-only access to the repository at the head commit through read_file(path, start, end), list_dir(path), search(pattern, path), search_base(pattern, path) for the base branch, definition(name, path), references(name, path) and outline(path). Use them when the outcome depends on a callee, a caller or a type you cannot see: a few lookups, not a tour, and issue independent lookups in the same turn. When done, call submit_findings exactly once with a contract for each function and the findings, each quoting the line it is about exactly as shown, without the line number and marker. Never write the answer as plain text.`
+You have read-only access to the repository at the head commit through read_file(path, start, end), list_dir(path), search(pattern, path), search_base(pattern, path) for the base branch, definition(name, path), references(name, path) and outline(path). The functions above are shown exactly as they are at the head commit, so never read them again. Use the tools when the outcome depends on a callee, a caller or a type you cannot see: a few lookups, not a tour, and issue independent lookups in the same turn. When done, call submit_findings exactly once with a contract for each function and the findings, each quoting the line it is about exactly as shown, without the line number and marker. Never write the answer as plain text.`
 
 var UnitSchema = json.RawMessage(`{
   "type": "object",
@@ -70,9 +70,9 @@ const (
 	unitCallBytes  = 10 << 10
 	maxUnitCallers = 1500
 	maxUnits       = 40
-	unitToolCalls  = 6
+	unitToolCalls  = 10
 	maxUnitHeader  = 2500
-	unitCallTime   = 2 * time.Minute
+	unitCallTime   = 3 * time.Minute
 )
 
 var codeExt = map[string]bool{
@@ -341,7 +341,7 @@ func callersOf(ctx context.Context, repo Repo, u *unit) string {
 	return out
 }
 
-func Units(ctx context.Context, repo Repo, files []*diff.File, ignore []string) []*unit {
+func Units(ctx context.Context, repo Repo, files []*diff.File, ignore, only []string) []*unit {
 	var all []*unit
 	for _, f := range files {
 		if f.Binary || f.Deleted || diff.Ignored(f.Path, ignore) || !codeFile(f.Path) {
@@ -351,6 +351,9 @@ func Units(ctx context.Context, repo Repo, files []*diff.File, ignore []string) 
 			break
 		}
 		all = append(all, fileUnits(ctx, repo, f)...)
+	}
+	if len(only) > 0 {
+		all = selectUnits(all, only)
 	}
 	sort.SliceStable(all, func(i, j int) bool {
 		if (all[i].name == "") != (all[j].name == "") {
@@ -368,6 +371,21 @@ func Units(ctx context.Context, repo Repo, files []*diff.File, ignore []string) 
 		u.callers = callersOf(ctx, repo, u)
 	}
 	return all
+}
+
+func selectUnits(units []*unit, only []string) []*unit {
+	var out []*unit
+	for _, u := range units {
+		for _, spec := range only {
+			path, line, _ := strings.Cut(spec, ":")
+			n, _ := strconv.Atoi(line)
+			if u.name == spec || (strings.HasSuffix(u.path, path) && (line == "" || (u.start <= n && n <= u.end))) {
+				out = append(out, u)
+				break
+			}
+		}
+	}
+	return out
 }
 
 func PackUnits(units []*unit, maxBytes int) [][]*unit {
