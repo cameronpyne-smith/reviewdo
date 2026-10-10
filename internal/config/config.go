@@ -222,10 +222,6 @@ func (c *Config) applyDefaults() error {
 		v := true
 		c.Review.Verify = &v
 	}
-	if c.Review.Units == nil {
-		v := true
-		c.Review.Units = &v
-	}
 	if c.Review.TimeBudget.Duration == 0 {
 		c.Review.TimeBudget.Duration = 5 * time.Minute
 	}

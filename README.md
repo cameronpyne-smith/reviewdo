@@ -50,13 +50,15 @@ reads anything else by line range, so a few large files cannot fill the
 context window. Without `clone_dir`, reviews use the diff alone.
 
 Large pull requests are reviewed in parts of related files, each with full
-tool access, then merged. A deep pass then takes each changed function in
-the code files (tests, examples and documentation excluded), shown whole
-with its changed lines marked and the places the repository calls it, in
-small groups, and asks the model to state the function's contract and then
-find one concrete input or sequence of events that breaks it. The largest
-changes go first, so a pull request too big for the time budget still gets
-its main functions examined. When the repository has instruction files, a
+tool access, then merged. With `review.units` on, a deep pass then takes
+each changed function in the code files (tests, examples and documentation
+excluded), shown whole with its changed lines marked and the places the
+repository calls it, in small groups, and asks the model to state the
+function's contract and then find one concrete input or sequence of events
+that breaks it. The largest changes go first, so a pull request too big for
+the time budget still gets its main functions examined. It is off by
+default: on the benchmark set it found nothing the whole-PR pass missed and
+the time it took from that pass cost two findings. When the repository has instruction files, a
 separate pass with no tools checks every added line against them and
 reports each breach with the rule quoted; a quote that does not appear in
 the instructions is discarded. A triage pass drops findings that say nothing
@@ -195,7 +197,7 @@ See `deploy/config.example.json`. Fields:
 | `review.part_time` | `2m` | minimum time for each part, so a large PR is read properly even when it overruns the budget |
 | `review.triage` | `true` | one fast model call before verification that drops findings which say nothing concrete (reassurance, "please verify", generic advice) and sets each finding's severity from fixed definitions |
 | `review.verify` | `true` | verify every finding with a second pass before posting, highest severity first |
-| `review.units` | `true` | the deep pass over changed functions; it takes half of the time left after verification's reserve |
+| `review.units` | `false` | the deep pass over changed functions; it takes half of the time left after verification's reserve |
 | `review.time_budget` | `5m` | target duration for one review; parts and verification are cut short to fit |
 | `review.timeout` | `3 × time_budget` | hard deadline, after which the review is abandoned |
 | `review.max_output_tokens` | `48000` | total output tokens per review before the final answer is forced |
