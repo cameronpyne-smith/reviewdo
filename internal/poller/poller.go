@@ -416,7 +416,7 @@ func mustRead(group []*diff.File, ignore []string, max int) []string {
 	return out
 }
 
-func (p *Poller) Facts(ctx context.Context, repoCfg config.Repo, pull *github.Pull) (string, error) {
+func (p *Poller) Facts(ctx context.Context, repoCfg config.Repo, pull *github.Pull, showUnits bool) (string, error) {
 	if p.store == nil {
 		return "", errors.New("clone_dir is not set")
 	}
@@ -432,11 +432,17 @@ func (p *Poller) Facts(ctx context.Context, repoCfg config.Repo, pull *github.Pu
 	start := time.Now()
 	sets := review.SiblingSets(ctx, repo, files)
 	checks, timing := review.Checks(ctx, repo, files, sets)
+	units := review.Units(ctx, repo, files, p.cfg.Review.Ignore)
 	var b strings.Builder
-	for _, s := range []string{review.Symbols(ctx, repo, files), review.Siblings(ctx, repo, files, sets), review.Dependencies(ctx, repo, files), checks} {
+	for _, s := range []string{review.Symbols(ctx, repo, files), review.Siblings(ctx, repo, files, sets), review.Dependencies(ctx, repo, files), checks, review.DescribeUnits(units, review.PackUnits(units, 10<<10))} {
 		if s != "" {
 			b.WriteString(s)
 			b.WriteString("\n")
+		}
+	}
+	if showUnits {
+		for i, call := range review.PackUnits(units, 10<<10) {
+			fmt.Fprintf(&b, "\n===== call %d =====\n%s", i+1, review.UnitInput("", call))
 		}
 	}
 	fmt.Fprintf(&b, "[%d files, %s; checks: %s]\n", len(files), time.Since(start).Round(time.Millisecond), timing)
@@ -511,7 +517,12 @@ func (p *Poller) ReviewAt(ctx context.Context, repoCfg config.Repo, pull *github
 	start := time.Now()
 	budget := p.cfg.Review.TimeBudget.Duration
 	reserve := budget * 2 / 5
-	perPart := (budget - reserve) / time.Duration(len(groups))
+	deep := repo != nil && p.cfg.Review.Units != nil && *p.cfg.Review.Units
+	finder := budget - reserve
+	if deep {
+		finder /= 2
+	}
+	perPart := finder / time.Duration(len(groups))
 	hard := start.Add(p.cfg.Review.Timeout.Duration)
 	if d, ok := ctx.Deadline(); ok && d.Before(hard) {
 		hard = d
@@ -589,6 +600,24 @@ func (p *Poller) ReviewAt(ctx context.Context, repoCfg config.Repo, pull *github
 	res.SkippedParts = skipped
 	var rejected []review.Comment
 	adjusted := false
+
+	if deep && time.Now().Before(hard.Add(-reserve)) {
+		deadline := start.Add(budget - reserve)
+		if floor := time.Now().Add(p.cfg.Review.PartTime.Duration); floor.After(deadline) {
+			deadline = floor
+		}
+		if last := hard.Add(-reserve); deadline.After(last) {
+			deadline = last
+		}
+		deadline = deadline.Add(-20 * time.Second)
+		deepStart := time.Now()
+		units := review.Units(ctx, repo, promptFiles, p.cfg.Review.Ignore)
+		oc := review.ReviewUnits(ctx, p.llm, repo, header, units, review.Limits{MaxOutput: p.cfg.Review.MaxOutput / 3, MaxContext: maxContext, Changed: review.ChangedSpans(files)}, deadline, log)
+		total.Merge(oc.Stats)
+		var added int
+		res.Comments, added = review.AddComments(res.Comments, oc.Comments)
+		log.Info("deep pass", "units", oc.Units, "calls", oc.Calls, "reviewed", oc.Reviewed, "findings", len(oc.Comments), "added", added, "took", time.Since(deepStart).Round(time.Second))
+	}
 
 	if repo != nil && time.Now().Before(hard.Add(-reserve/2)) {
 		docs := repoInstructions

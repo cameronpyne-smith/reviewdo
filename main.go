@@ -34,7 +34,7 @@ Commands:
                            review one pull request and post it to GitHub
   review -model m -think v owner/repo#N
                            review with a different model or thinking setting
-  facts owner/repo#N       print the facts computed in code for a pull request, without the model
+  facts [-units] owner/repo#N  print the facts computed in code for a pull request, without the model
 `
 
 func main() {
@@ -311,10 +311,13 @@ func showReviews(ctx context.Context, cfgPath string, args []string) error {
 }
 
 func showFacts(ctx context.Context, cfgPath string, args []string, log *slog.Logger) error {
-	if len(args) != 1 {
-		return errors.New("usage: reviewdo facts owner/repo#N")
+	fs := flag.NewFlagSet("facts", flag.ExitOnError)
+	units := fs.Bool("units", false, "also print the text of each deep-pass call")
+	fs.Parse(args)
+	if fs.NArg() != 1 {
+		return errors.New("usage: reviewdo facts [-units] owner/repo#N")
 	}
-	repoName, number, err := poller.ParseRef(args[0])
+	repoName, number, err := poller.ParseRef(fs.Arg(0))
 	if err != nil {
 		return err
 	}
@@ -327,7 +330,7 @@ func showFacts(ctx context.Context, cfgPath string, args []string, log *slog.Log
 		return err
 	}
 	p := poller.New(a.cfg, a.gh, a.llm, &state.State{}, false, a.slug, log)
-	out, err := p.Facts(ctx, a.cfg.RepoFor(repoName), pull)
+	out, err := p.Facts(ctx, a.cfg.RepoFor(repoName), pull, *units)
 	if err != nil {
 		return err
 	}
