@@ -17,6 +17,7 @@ type Repo interface {
 	ReadFile(ctx context.Context, path string) (string, error)
 	ListDir(ctx context.Context, path string) (string, error)
 	Search(ctx context.Context, pattern, path string) (string, error)
+	Grep(ctx context.Context, pattern string, max int) ([]string, error)
 	SearchBase(ctx context.Context, pattern, path string) (string, error)
 	Definition(ctx context.Context, name, path string) (string, error)
 	References(ctx context.Context, name, path string) (string, error)

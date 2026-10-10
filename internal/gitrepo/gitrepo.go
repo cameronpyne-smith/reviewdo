@@ -287,6 +287,31 @@ func (r *Repo) SearchAt(ctx context.Context, ref, pattern, p string) (string, er
 	return formatGrep(string(out), ref+":"), nil
 }
 
+func (r *Repo) Grep(ctx context.Context, pattern string, max int) ([]string, error) {
+	if strings.TrimSpace(pattern) == "" {
+		return nil, errors.New("pattern is required")
+	}
+	out, err := r.run(ctx, "grep", "-n", "-I", "-E", "-e", pattern, r.head)
+	if err != nil {
+		if len(out) == 0 {
+			return nil, nil
+		}
+		return nil, err
+	}
+	prefix := r.head + ":"
+	var lines []string
+	for _, l := range strings.Split(strings.TrimRight(string(out), "\n"), "\n") {
+		if l == "" {
+			continue
+		}
+		if len(lines) >= max {
+			break
+		}
+		lines = append(lines, truncateLine(strings.TrimPrefix(l, prefix), maxGrepLine))
+	}
+	return lines, nil
+}
+
 func formatGrep(out, prefix string) string {
 	var b strings.Builder
 	n := 0

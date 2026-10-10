@@ -3,6 +3,9 @@ package review
 import (
 	"context"
 	"errors"
+	"fmt"
+	"regexp"
+	"sort"
 	"strings"
 	"testing"
 
@@ -42,6 +45,26 @@ func (r treeRepo) ListDir(_ context.Context, p string) (string, error) {
 }
 func (r treeRepo) Search(context.Context, string, string) (string, error)     { return "", nil }
 func (r treeRepo) SearchBase(context.Context, string, string) (string, error) { return "", nil }
+func (r treeRepo) Grep(_ context.Context, pattern string, max int) ([]string, error) {
+	re, err := regexp.Compile(pattern)
+	if err != nil {
+		return nil, err
+	}
+	var paths []string
+	for p := range r {
+		paths = append(paths, p)
+	}
+	sort.Strings(paths)
+	var out []string
+	for _, p := range paths {
+		for i, l := range strings.Split(r[p], "\n") {
+			if re.MatchString(l) && len(out) < max {
+				out = append(out, fmt.Sprintf("%s:%d:%s", p, i+1, l))
+			}
+		}
+	}
+	return out, nil
+}
 func (r treeRepo) Definition(context.Context, string, string) (string, error) { return "", nil }
 func (r treeRepo) References(context.Context, string, string) (string, error) { return "", nil }
 
@@ -58,7 +81,7 @@ func TestSiblingsReportsKeysMostSiblingsSet(t *testing.T) {
 		{Path: "apps/api-signalr/overlays/prod/patches/deployment-replicas.yaml", Added: true},
 		{Path: "docs/readme.md"},
 	}
-	out := Siblings(context.Background(), repo, files)
+	out := Siblings(context.Background(), repo, files, SiblingSets(context.Background(), repo, files))
 	for _, want := range []string{"3 sibling files with the same path under apps/<other>/", "api-baas, api-notifier", "nodeSelector (3 of 3)", "pool (3 of 3)"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("missing %q in:\n%s", want, out)
@@ -70,7 +93,7 @@ func TestSiblingsReportsKeysMostSiblingsSet(t *testing.T) {
 	if strings.Contains(out, "readme") {
 		t.Errorf("file without siblings listed:\n%s", out)
 	}
-	if Siblings(context.Background(), repo, []*diff.File{{Path: "docs/readme.md"}}) != "" {
+	if Siblings(context.Background(), repo, []*diff.File{{Path: "docs/readme.md"}}, nil) != "" {
 		t.Error("expected empty output when nothing has siblings")
 	}
 }

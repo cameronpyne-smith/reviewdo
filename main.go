@@ -34,6 +34,7 @@ Commands:
                            review one pull request and post it to GitHub
   review -model m -think v owner/repo#N
                            review with a different model or thinking setting
+  facts owner/repo#N       print the facts computed in code for a pull request, without the model
 `
 
 func main() {
@@ -75,6 +76,8 @@ func main() {
 		err = showReviews(ctx, *cfgPath, args)
 	case "review":
 		err = reviewOne(ctx, *cfgPath, args, log)
+	case "facts":
+		err = showFacts(ctx, *cfgPath, args, log)
 	case "bench":
 		err = benchCmd(ctx, *cfgPath, args, log)
 	default:
@@ -304,6 +307,31 @@ func showReviews(ctx context.Context, cfgPath string, args []string) error {
 		}
 		fmt.Println()
 	}
+	return nil
+}
+
+func showFacts(ctx context.Context, cfgPath string, args []string, log *slog.Logger) error {
+	if len(args) != 1 {
+		return errors.New("usage: reviewdo facts owner/repo#N")
+	}
+	repoName, number, err := poller.ParseRef(args[0])
+	if err != nil {
+		return err
+	}
+	a, err := setup(ctx, cfgPath)
+	if err != nil {
+		return err
+	}
+	pull, err := a.gh.Pull(ctx, repoName, number)
+	if err != nil {
+		return err
+	}
+	p := poller.New(a.cfg, a.gh, a.llm, &state.State{}, false, a.slug, log)
+	out, err := p.Facts(ctx, a.cfg.RepoFor(repoName), pull)
+	if err != nil {
+		return err
+	}
+	fmt.Print(out)
 	return nil
 }
 

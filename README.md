@@ -19,12 +19,18 @@ each configured repository it:
    Requests by comment are reviewed first, then labels, then newly opened
    PRs, oldest first; every repository is rescanned between reviews so a
    new request never waits behind the backlog.
-4. Fetches the diff, lists every declaration the diff adds, changes or
-   removes with where the repository uses that name, compares each changed
-   file with its counterparts under sibling directories (environment
-   overlays, sibling apps) and names the keys most of them set that this
-   file lacks, lists the dependencies declared by the nearest manifests
-   with their versions, lets the model read
+4. Fetches the diff and runs the checks that need no model: every
+   declaration the diff adds, changes or removes with where the repository
+   uses that name; each changed file against its counterparts under sibling
+   directories (environment overlays, sibling apps), naming the keys most
+   of them set that this file lacks; the dependencies declared by the
+   nearest manifests with their versions; paths and links written in added
+   lines that do not exist at the head commit; keys removed from
+   configuration, workflow or translation files that the repository still
+   uses; names in added strings and values that occur nowhere else but
+   have a differently spelled near match; and added lines that name a
+   sibling environment of the file they are in. These go into the prompt
+   as facts. The model then reads
    the repository at the PR's head commit through read-only tools, and
    posts the result as a review: a
    verdict, a one-line summary, a findings list with each finding's
@@ -109,6 +115,7 @@ reviewdo -config config.json pulls owner/repo            # list open PRs
 reviewdo -config config.json review owner/repo#12        # dry run, prints the review
 reviewdo -config config.json review -post owner/repo#12  # post it
 reviewdo -config config.json review -model m -think false owner/repo#12
+reviewdo -config config.json facts owner/repo#12         # print the code-side checks for a PR, no model
 reviewdo -config config.json run                         # poll loop (default)
 ```
 

@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/cameronpyne-smith/reviewdo/internal/config"
@@ -415,6 +416,33 @@ func mustRead(group []*diff.File, ignore []string, max int) []string {
 	return out
 }
 
+func (p *Poller) Facts(ctx context.Context, repoCfg config.Repo, pull *github.Pull) (string, error) {
+	if p.store == nil {
+		return "", errors.New("clone_dir is not set")
+	}
+	raw, err := p.gh.PullDiff(ctx, repoCfg.Name, pull.Number)
+	if err != nil {
+		return "", fmt.Errorf("fetch diff: %w", err)
+	}
+	files := diff.Parse(raw)
+	repo, err := p.store.Ensure(ctx, repoCfg.Name, pull.Number, pull.Head.SHA, pull.Base.SHA)
+	if err != nil {
+		return "", err
+	}
+	start := time.Now()
+	sets := review.SiblingSets(ctx, repo, files)
+	checks, timing := review.Checks(ctx, repo, files, sets)
+	var b strings.Builder
+	for _, s := range []string{review.Symbols(ctx, repo, files), review.Siblings(ctx, repo, files, sets), review.Dependencies(ctx, repo, files), checks} {
+		if s != "" {
+			b.WriteString(s)
+			b.WriteString("\n")
+		}
+	}
+	fmt.Fprintf(&b, "[%d files, %s; checks: %s]\n", len(files), time.Since(start).Round(time.Millisecond), timing)
+	return b.String(), nil
+}
+
 func (p *Poller) ReviewAt(ctx context.Context, repoCfg config.Repo, pull *github.Pull, head, base, previousSHA string, log *slog.Logger) (*Outcome, error) {
 	var fullDiff []byte
 	var err error
@@ -506,10 +534,17 @@ func (p *Poller) ReviewAt(ctx context.Context, repoCfg config.Repo, pull *github
 		lim.Deadline = lim.Deadline.Add(-20 * time.Second)
 		lim.MustRead = mustRead(group, p.cfg.Review.Ignore, 6)
 		lim.Changed = review.ChangedSpans(group)
-		var symbols, siblings string
+		var symbols, siblings, checks string
 		if repo != nil {
-			symbols = review.Symbols(ctx, repo, group)
-			siblings = review.Siblings(ctx, repo, group)
+			sets := review.SiblingSets(ctx, repo, group)
+			var wg sync.WaitGroup
+			wg.Add(3)
+			go func() { defer wg.Done(); symbols = review.Symbols(ctx, repo, group) }()
+			go func() { defer wg.Done(); siblings = review.Siblings(ctx, repo, group, sets) }()
+			var timing string
+			go func() { defer wg.Done(); checks, timing = review.Checks(ctx, repo, group, sets) }()
+			wg.Wait()
+			log.Debug("checks", "part", i+1, "bytes", len(checks), "took", timing)
 		}
 		prompt := review.BuildPrompt(review.Input{
 			Repo:         repoCfg.Name,
@@ -520,6 +555,7 @@ func (p *Poller) ReviewAt(ctx context.Context, repoCfg config.Repo, pull *github
 			Symbols:      symbols,
 			Siblings:     siblings,
 			Dependencies: dependencies,
+			Checks:       checks,
 			Files:        group,
 			AllFiles:     promptPaths,
 			Ignore:       p.cfg.Review.Ignore,

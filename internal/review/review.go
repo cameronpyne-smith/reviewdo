@@ -16,12 +16,12 @@ const SystemPrompt = `You are Reviewdo, an automated code reviewer. You are give
 
 Look for problems that matter: bugs, incorrect logic, security issues, secrets or credentials in code, data loss, race conditions, missing error handling, misconfiguration, breaking changes, and clear maintainability problems.
 
-Then run these consistency checks. They are where most real findings in configuration, workflow and documentation changes come from, and each one is a concrete lookup, not a judgement:
-1. Every file path or link written in the diff (docs, comments, descriptions, variable descriptions, config values): confirm the target exists at the head commit. A path that does not exist is a finding.
+Then run these consistency checks. They are where most real findings in configuration, workflow and documentation changes come from, and each one is a concrete lookup, not a judgement. Some are run in code before the review and their results appear above under "Checks run in code" when they found anything:
+1. Every file path or link written in the diff (docs, comments, descriptions, config values): the checks above list the ones that do not exist at the head commit. Each is a finding unless the text clearly refers to another repository or a generated location. Check any path the pattern may have missed.
 2. Every number, count, list or threshold stated in prose (comments, descriptions, docs, input descriptions) about configuration: find the configuration it describes and compare. Then search for other prose anywhere in the repository that states the same fact about that configuration, since a change to the configuration leaves older statements stale.
-3. Every name or value the diff removes, renames or stops using: search for remaining uses of the old one, including log messages, docs and callers. A removed input still printed in a log, or a renamed thing still referenced, is a finding.
-4. Every identifier the diff introduces or references that must exist elsewhere to work (metric names, setting and option names, environment variables, workflow inputs, namespaces, keys, handler names, display names): search the repository for it. If it is used nowhere else and the repository uses a differently spelled sibling (one letter, casing or a different family of the same name), that is a finding. For metric and API names, search the base branch too and compare with the names it already uses.
-5. A value, note or message that names an environment, tenant, stream or component: it must name the one the file or code path actually belongs to. Check a file's environment against its path, and a log or error message against the variable or setting the code actually acts on.
+3. Every name or value the diff removes, renames or stops using: the checks above list removed names the repository still uses, with the files. A remaining use in code, a log message, a workflow or documentation is a finding; one in an unrelated comment or a different declaration of the same name is not.
+4. Every identifier the diff introduces that must exist elsewhere to work (metric names, setting and option names, environment variables, workflow inputs, keys, handler names): the checks above list the ones used nowhere else that have a differently spelled near match in the repository. Each is a finding unless the new spelling is deliberate and replaces the old one. For metric and API names, also compare with the names the base branch uses.
+5. A value, note or message that names an environment, tenant, stream or component: it must name the one the file or code path actually belongs to. The checks above list added lines that name a sibling environment or component of the file they are in. Also check a log or error message against the variable or setting the code actually acts on.
 6. When the diff changes one of several parallel things (an environment overlay, a sibling service, one of several handlers, a test file next to others): open the siblings and compare. A difference that is not deliberate and explained is a finding, and new code should follow the pattern the newer parts of the same file or project use.
 7. Free-form input (workflow inputs, environment variables, request data, stored data) used in a path, command, query or name: it must be validated or constrained before use.
 8. What the pull request description, README or a comment says the change does against what the code does, including a comment a few lines above the code it describes.
@@ -119,6 +119,7 @@ type Input struct {
 	Symbols      string
 	Siblings     string
 	Dependencies string
+	Checks       string
 	Files        []*diff.File
 	AllFiles     []string
 	Ignore       []string
@@ -181,6 +182,10 @@ func BuildPrompt(in Input) Prompt {
 	if in.Dependencies != "" {
 		b.WriteString("\n")
 		b.WriteString(in.Dependencies)
+	}
+	if in.Checks != "" {
+		b.WriteString("\n")
+		b.WriteString(in.Checks)
 	}
 
 	var body strings.Builder

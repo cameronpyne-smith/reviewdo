@@ -85,22 +85,13 @@ func findSiblings(ctx context.Context, repo Repo, path string) *siblingSet {
 	return nil
 }
 
-func Siblings(ctx context.Context, repo Repo, files []*diff.File) string {
+func Siblings(ctx context.Context, repo Repo, files []*diff.File, sets map[string]*siblingSet) string {
 	var b strings.Builder
-	n := 0
 	for _, f := range files {
-		if f.Binary || f.Deleted || !strings.Contains(f.Path, "/") || ctx.Err() != nil {
+		set := sets[f.Path]
+		if set == nil || ctx.Err() != nil {
 			continue
 		}
-		if n >= maxSiblingFiles {
-			b.WriteString("[further changed files not compared]\n")
-			break
-		}
-		set := findSiblings(ctx, repo, f.Path)
-		if set == nil {
-			continue
-		}
-		n++
 		text, err := repo.ReadFile(ctx, f.Path)
 		if err != nil || len(text) > maxSiblingBytes {
 			continue
