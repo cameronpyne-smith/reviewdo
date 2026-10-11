@@ -616,7 +616,7 @@ func (p *Poller) ReviewAt(ctx context.Context, repoCfg config.Repo, pull *github
 		deadline = deadline.Add(-20 * time.Second)
 		deepStart := time.Now()
 		units := review.Units(ctx, repo, promptFiles, p.cfg.Review.Ignore, p.Units)
-		oc := review.ReviewUnits(ctx, p.llm, repo, header, units, review.Limits{MaxOutput: p.cfg.Review.MaxOutput / 3, MaxContext: maxContext, Changed: review.ChangedSpans(files)}, deadline, log)
+		oc := review.ReviewUnits(ctx, p.llm, header, units, deadline, log)
 		total.Merge(oc.Stats)
 		var added int
 		res.Comments, added = review.AddComments(res.Comments, oc.Comments)

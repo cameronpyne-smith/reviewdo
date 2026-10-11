@@ -16,15 +16,9 @@ import (
 	"github.com/cameronpyne-smith/reviewdo/internal/ollama"
 )
 
-const UnitPrompt = `You are Reviewdo, an automated code reviewer, examining a few changed functions from a pull request in depth. Each function is shown as it is at the head commit, with line numbers. A line marked + was added or changed by the pull request, a line marked - was removed by it and has no line number, and the rest is unchanged. Where the repository uses the function, its callers are listed after it.
+const UnitPrompt = `For each function, first state its contract in two sentences: what it promises its callers and the rest of the system. Then find one concrete sequence of events under which the function breaks that contract. Give the line where it goes wrong.
 
-For each function, first write its contract in one or two sentences: what it must return or produce, what state it leaves behind, what it must never do, as its callers rely on it. Then try to break it. Find one specific input, state or sequence of events for which the code as written does the wrong thing, and trace the code line by line for that case rather than reasoning from what the names suggest. Cases worth tracing: a value that can be absent, empty, zero, negative, NaN, out of range or malformed; an error or failure that is swallowed, attributed to the wrong cause, or leaves state half-updated; a connection, task, handle or lock that is not released on every path; a check that can be bypassed, or input that reaches a path, command, query or name unchecked; a loop or retry that continues after it should stop, or stops before it should; a message that names the wrong thing; shared state used from more than one task or request at once; a caller that relies on behaviour the change removed.
-
-Report only what you can show from the code. Each finding names the input or sequence, the lines it takes through the code, and the wrong outcome. Most functions are correct, and an empty findings list is the right answer when you cannot name a concrete failing case; never report a possibility, a style preference or a request to verify. Your knowledge of libraries and frameworks may be out of date: a claim about what a library call throws, returns or does by default needs evidence in the repository (a test, a comment, other code handling the same case); without it there is no finding. A suggested fix may only use methods, options and types the repository already uses; otherwise describe the fix in words.
-
-Severity: critical means it will certainly break, lose data or open a security hole; major means a likely bug; minor means worth fixing but not blocking; nit means optional. When unsure between two severities, choose the lower.
-
-You have read-only access to the repository at the head commit through read_file(path, start, end), list_dir(path), search(pattern, path), search_base(pattern, path) for the base branch, definition(name, path), references(name, path) and outline(path). The functions above are shown exactly as they are at the head commit, so never read them again. Use the tools when the outcome depends on a callee, a caller or a type you cannot see: a few lookups, not a tour, and issue independent lookups in the same turn. When done, call submit_findings exactly once with a contract for each function and the findings, each quoting the line it is about exactly as shown, without the line number and marker. Never write the answer as plain text.`
+Severity: critical means it will certainly break, lose data or open a security hole; major means a likely bug; minor means worth fixing but not blocking; nit means optional.`
 
 var UnitSchema = json.RawMessage(`{
   "type": "object",
@@ -60,9 +54,6 @@ var UnitSchema = json.RawMessage(`{
   "required": ["contracts", "findings"]
 }`)
 
-var unitTools = append(append([]ollama.Tool{}, reviewTools[:len(reviewTools)-1]...),
-	fn("submit_findings", "Submit the contracts and findings for the functions shown. Call exactly once when done.", string(UnitSchema)))
-
 const (
 	maxUnitLines   = 220
 	minUnitLines   = 8
@@ -70,7 +61,6 @@ const (
 	unitCallBytes  = 10 << 10
 	maxUnitCallers = 1500
 	maxUnits       = 40
-	unitToolCalls  = 10
 	maxUnitHeader  = 2500
 	unitCallTime   = 3 * time.Minute
 )
@@ -97,7 +87,6 @@ type unit struct {
 	end     int
 	changed int
 	text    string
-	callers string
 }
 
 func (u *unit) label() string {
@@ -108,7 +97,7 @@ func (u *unit) label() string {
 }
 
 func (u *unit) size() int {
-	return len(u.text) + len(u.callers)
+	return len(u.text)
 }
 
 func codeFile(p string) bool {
@@ -206,17 +195,10 @@ func contiguousDecorators(lines []string, from, to int) bool {
 	return true
 }
 
-func renderUnit(lines []string, c fileChanges, start, end int) string {
+func renderUnit(lines []string, start, end int) string {
 	var b strings.Builder
 	for n := start; n <= end; n++ {
-		for _, r := range c.removed[n] {
-			fmt.Fprintf(&b, "      - %s\n", r)
-		}
-		kind := ' '
-		if c.added[n] {
-			kind = '+'
-		}
-		fmt.Fprintf(&b, "%5d %c %s\n", n, kind, lines[n-1])
+		fmt.Fprintf(&b, "%5d   %s\n", n, lines[n-1])
 	}
 	return b.String()
 }
@@ -239,20 +221,20 @@ func windows(c fileChanges, start, end int) []Span {
 
 func unitText(lines []string, c fileChanges, start, end int) string {
 	if end-start+1 <= maxUnitLines {
-		return renderUnit(lines, c, start, end)
+		return renderUnit(lines, start, end)
 	}
 	var b strings.Builder
-	fmt.Fprintf(&b, "(%d lines; only the changed regions are shown, read the rest with read_file)\n", end-start+1)
+	fmt.Fprintf(&b, "(%d lines; only the changed regions are shown)\n", end-start+1)
 	ws := windows(c, start, end)
 	if len(ws) == 0 || ws[0].Start > start {
-		b.WriteString(renderUnit(lines, c, start, start))
+		b.WriteString(renderUnit(lines, start, start))
 		b.WriteString("      ...\n")
 	}
 	for i, w := range ws {
 		if i > 0 {
 			b.WriteString("      ...\n")
 		}
-		b.WriteString(renderUnit(lines, c, w.Start, w.End))
+		b.WriteString(renderUnit(lines, w.Start, w.End))
 	}
 	return b.String()
 }
@@ -323,24 +305,6 @@ func coalesce(units []*unit, lines []string, c fileChanges) []*unit {
 	return out
 }
 
-func callersOf(ctx context.Context, repo Repo, u *unit) string {
-	if u.name == "" {
-		return ""
-	}
-	out, err := repo.References(ctx, u.name, "")
-	if err != nil {
-		return ""
-	}
-	r := parseReferences(out)
-	if r.count == 0 || r.count >= commonUses || len(r.files) >= commonFiles {
-		return ""
-	}
-	if len(out) > maxUnitCallers {
-		out = out[:maxUnitCallers] + "\n[more omitted]\n"
-	}
-	return out
-}
-
 func Units(ctx context.Context, repo Repo, files []*diff.File, ignore, only []string) []*unit {
 	var all []*unit
 	for _, f := range files {
@@ -363,12 +327,6 @@ func Units(ctx context.Context, repo Repo, files []*diff.File, ignore, only []st
 	})
 	if len(all) > maxUnits {
 		all = all[:maxUnits]
-	}
-	for _, u := range all {
-		if ctx.Err() != nil {
-			break
-		}
-		u.callers = callersOf(ctx, repo, u)
 	}
 	return all
 }
@@ -413,9 +371,6 @@ func UnitInput(header string, call []*unit) string {
 	for _, u := range call {
 		fmt.Fprintf(&b, "\n### %s\n", u.label())
 		b.WriteString(u.text)
-		if u.callers != "" {
-			fmt.Fprintf(&b, "\nUses of %s in the repository:\n%s", u.name, u.callers)
-		}
 	}
 	return b.String()
 }
@@ -433,11 +388,7 @@ func DescribeUnits(units []*unit, calls [][]*unit) string {
 		}
 		fmt.Fprintf(&b, "call %d (%d KB):\n", i+1, (size+512)>>10)
 		for _, u := range call {
-			callers := "no callers listed"
-			if u.callers != "" {
-				callers = strings.SplitN(u.callers, "\n", 2)[0]
-			}
-			fmt.Fprintf(&b, "  - %s: %d changed lines, %d bytes, %s\n", u.label(), u.changed, len(u.text), callers)
+			fmt.Fprintf(&b, "  - %s: %d changed lines, %d bytes\n", u.label(), u.changed, len(u.text))
 		}
 	}
 	return b.String()
@@ -452,16 +403,10 @@ type unitResult struct {
 	Findings []Comment `json:"findings"`
 }
 
-func reviewUnitCall(ctx context.Context, llm *ollama.Client, repo Repo, header string, call []*unit, lim Limits, log *slog.Logger) ([]Comment, Stats, error) {
-	messages := []ollama.Message{
-		{Role: "system", Content: UnitPrompt},
-		{Role: "user", Content: UnitInput(header, call)},
-	}
-	validate := func(raw json.RawMessage) error {
-		var r unitResult
-		return json.Unmarshal(raw, &r)
-	}
-	raw, st, err := runLoop(ctx, llm, repo, messages, unitTools, "submit_findings", UnitSchema, validate, lim, log)
+func reviewUnitCall(ctx context.Context, llm *ollama.Client, header string, call []*unit, log *slog.Logger) ([]Comment, Stats, error) {
+	ctx, cancel := context.WithTimeout(ctx, unitCallTime)
+	defer cancel()
+	raw, st, err := RunSingle(ctx, llm, UnitPrompt, UnitInput(header, call), UnitSchema)
 	if err != nil {
 		return nil, st, err
 	}
@@ -498,7 +443,7 @@ type UnitOutcome struct {
 	Stats    Stats
 }
 
-func ReviewUnits(ctx context.Context, llm *ollama.Client, repo Repo, header string, units []*unit, lim Limits, deadline time.Time, log *slog.Logger) UnitOutcome {
+func ReviewUnits(ctx context.Context, llm *ollama.Client, header string, units []*unit, deadline time.Time, log *slog.Logger) UnitOutcome {
 	calls := PackUnits(units, unitCallBytes)
 	oc := UnitOutcome{Units: len(units), Calls: len(calls)}
 	for i, call := range calls {
@@ -506,24 +451,19 @@ func ReviewUnits(ctx context.Context, llm *ollama.Client, repo Repo, header stri
 			log.Warn("no time left for the deep pass, skipping the remaining calls", "reviewed", i, "skipped", len(calls)-i)
 			break
 		}
-		l := lim
-		l.MaxToolCalls = unitToolCalls
-		l.Deadline = time.Now().Add(unitCallTime)
-		if l.Deadline.After(deadline) {
-			l.Deadline = deadline
-		}
 		var names []string
 		for _, u := range call {
 			names = append(names, u.label())
 		}
-		comments, st, err := reviewUnitCall(ctx, llm, repo, header, call, l, log.With("units", i+1))
+		started := time.Now()
+		comments, st, err := reviewUnitCall(ctx, llm, header, call, log.With("units", i+1))
 		oc.Stats.Merge(st)
 		oc.Reviewed++
 		if err != nil {
 			log.Warn("deep pass call failed", "units", names, "err", err)
 			continue
 		}
-		log.Info("units reviewed", "call", i+1, "of", len(calls), "units", names, "findings", len(comments), "rounds", st.Rounds, "tool_calls", st.ToolCalls, "took", st.Duration.Round(time.Second))
+		log.Info("units reviewed", "call", i+1, "of", len(calls), "units", names, "findings", len(comments), "rounds", st.Rounds, "output_tokens", st.OutputTokens, "truncated", st.Truncated, "took", time.Since(started).Round(time.Second))
 		oc.Comments = append(oc.Comments, comments...)
 	}
 	return oc

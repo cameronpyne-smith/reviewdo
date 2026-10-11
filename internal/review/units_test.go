@@ -68,13 +68,13 @@ func TestUnitsSplitsAtFunctionsAndMarksChanges(t *testing.T) {
 	if u.name != "second" || u.start != 12 || u.end != 15 || u.changed != 2 {
 		t.Errorf("unexpected unit %+v", u)
 	}
-	for _, want := range []string{"      - \treturn b\n", "   13 + \treturn fmt.Sprintf", "   12   func second"} {
+	for _, want := range []string{"   13   \treturn fmt.Sprintf", "   12   func second"} {
 		if !strings.Contains(u.text, want) {
 			t.Errorf("missing %q in:\n%s", want, u.text)
 		}
 	}
-	if !strings.Contains(u.callers, "other.go") {
-		t.Errorf("callers missing other.go:\n%s", u.callers)
+	if strings.Contains(u.text, "return b\n") {
+		t.Errorf("removed line shown:\n%s", u.text)
 	}
 }
 
@@ -96,7 +96,7 @@ func TestUnitTextWindowsLargeUnits(t *testing.T) {
 	}
 	c := fileChanges{added: map[int]bool{300: true}, removed: map[int][]string{}}
 	text := unitText(lines, c, 1, 400)
-	if !strings.Contains(text, "only the changed regions") || !strings.Contains(text, "  300 + line") || strings.Contains(text, "  200   line") {
+	if !strings.Contains(text, "only the changed regions") || !strings.Contains(text, "  300   line") || strings.Contains(text, "  200   line") {
 		t.Errorf("unexpected window:\n%s", text)
 	}
 	if !strings.HasPrefix(strings.SplitN(text, "\n", 3)[1], "    1   line") {

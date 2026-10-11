@@ -52,13 +52,16 @@ context window. Without `clone_dir`, reviews use the diff alone.
 Large pull requests are reviewed in parts of related files, each with full
 tool access, then merged. With `review.units` on, a deep pass then takes
 each changed function in the code files (tests, examples and documentation
-excluded), shown whole with its changed lines marked and the places the
-repository calls it, in small groups, and asks the model to state the
-function's contract and then find one concrete input or sequence of events
-that breaks it. The largest changes go first, so a pull request too big for
-the time budget still gets its main functions examined. It is off by
-default: on the benchmark set it found nothing the whole-PR pass missed and
-the time it took from that pass cost two findings. When the repository has instruction files, a
+excluded), shown whole with line numbers, in small groups, and asks the
+model in a single call with no tools to state each function's contract and
+then find one concrete sequence of events that breaks it. The largest
+changes go first, so a pull request too big for the time budget still gets
+its main functions examined. The question is deliberately bare: on the
+benchmark a reviewer framing, a list of cases to check, an instruction to
+report only what the code shows, changed-line markers or a list of callers
+each turned the answer into "no break found" on a function with a planted
+bug. The noise the bare question produces is what triage and verification
+remove. It is off by default. When the repository has instruction files, a
 separate pass with no tools checks every added line against them and
 reports each breach with the rule quoted; a quote that does not appear in
 the instructions is discarded. A triage pass drops findings that say nothing
