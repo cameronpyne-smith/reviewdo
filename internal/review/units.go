@@ -61,7 +61,6 @@ const (
 	unitCallBytes  = 10 << 10
 	maxUnitCallers = 1500
 	maxUnits       = 40
-	maxUnitHeader  = 2500
 	unitCallTime   = 3 * time.Minute
 )
 
@@ -364,10 +363,8 @@ func PackUnits(units []*unit, maxBytes int) [][]*unit {
 	return calls
 }
 
-func UnitInput(header string, call []*unit) string {
+func UnitInput(call []*unit) string {
 	var b strings.Builder
-	b.WriteString(truncate(header, maxUnitHeader))
-	b.WriteString("\n")
 	for _, u := range call {
 		fmt.Fprintf(&b, "\n### %s\n", u.label())
 		b.WriteString(u.text)
@@ -403,10 +400,10 @@ type unitResult struct {
 	Findings []Comment `json:"findings"`
 }
 
-func reviewUnitCall(ctx context.Context, llm *ollama.Client, header string, call []*unit, log *slog.Logger) ([]Comment, Stats, error) {
+func reviewUnitCall(ctx context.Context, llm *ollama.Client, call []*unit, log *slog.Logger) ([]Comment, Stats, error) {
 	ctx, cancel := context.WithTimeout(ctx, unitCallTime)
 	defer cancel()
-	raw, st, err := RunSingle(ctx, llm, UnitPrompt, UnitInput(header, call), UnitSchema)
+	raw, st, err := RunSingle(ctx, llm, UnitPrompt, UnitInput(call), UnitSchema)
 	if err != nil {
 		return nil, st, err
 	}
@@ -443,7 +440,7 @@ type UnitOutcome struct {
 	Stats    Stats
 }
 
-func ReviewUnits(ctx context.Context, llm *ollama.Client, header string, units []*unit, deadline time.Time, log *slog.Logger) UnitOutcome {
+func ReviewUnits(ctx context.Context, llm *ollama.Client, units []*unit, deadline time.Time, log *slog.Logger) UnitOutcome {
 	calls := PackUnits(units, unitCallBytes)
 	oc := UnitOutcome{Units: len(units), Calls: len(calls)}
 	for i, call := range calls {
@@ -456,7 +453,7 @@ func ReviewUnits(ctx context.Context, llm *ollama.Client, header string, units [
 			names = append(names, u.label())
 		}
 		started := time.Now()
-		comments, st, err := reviewUnitCall(ctx, llm, header, call, log.With("units", i+1))
+		comments, st, err := reviewUnitCall(ctx, llm, call, log.With("units", i+1))
 		oc.Stats.Merge(st)
 		oc.Reviewed++
 		if err != nil {

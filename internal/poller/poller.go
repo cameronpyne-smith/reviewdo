@@ -443,7 +443,7 @@ func (p *Poller) Facts(ctx context.Context, repoCfg config.Repo, pull *github.Pu
 	}
 	if showUnits {
 		for i, call := range review.PackUnits(units, 10<<10) {
-			fmt.Fprintf(&b, "\n===== call %d =====\n%s", i+1, review.UnitInput("", call))
+			fmt.Fprintf(&b, "\n===== call %d =====\n%s", i+1, review.UnitInput(call))
 		}
 	}
 	fmt.Fprintf(&b, "[%d files, %s; checks: %s]\n", len(files), time.Since(start).Round(time.Millisecond), timing)
@@ -616,7 +616,7 @@ func (p *Poller) ReviewAt(ctx context.Context, repoCfg config.Repo, pull *github
 		deadline = deadline.Add(-20 * time.Second)
 		deepStart := time.Now()
 		units := review.Units(ctx, repo, promptFiles, p.cfg.Review.Ignore, p.Units)
-		oc := review.ReviewUnits(ctx, p.llm, header, units, deadline, log)
+		oc := review.ReviewUnits(ctx, p.llm, units, deadline, log)
 		total.Merge(oc.Stats)
 		var added int
 		res.Comments, added = review.AddComments(res.Comments, oc.Comments)
