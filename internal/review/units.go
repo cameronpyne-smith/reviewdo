@@ -343,7 +343,7 @@ var riskRes = []*regexp.Regexp{
 	regexp.MustCompile(`\b(retry|Retry|timeout|Timeout|deadline|Deadline|sleep|Sleep|Duration|TimeSpan|setTimeout|Instant|now\(\)|Now)\b`),
 	regexp.MustCompile(`\b(catch|except|rescue|Err|err|error|Error|unwrap|expect|panic|throw|raise|fail|Fail)\b`),
 	regexp.MustCompile(`\b(parse|Parse|decode|Decode|deserialize|Deserialize|split|Split|slice|Slice|substring|Substring|indexOf|IndexOf|trim|Trim|match|Match|regex|Regex|RegExp)\b`),
-	regexp.MustCompile(`\b(while|loop|continue|break|yield|return null|nil|None|undefined|default)\b`),
+	regexp.MustCompile(`\b(for|foreach|while|loop|continue|break|yield|return null|nil|None|undefined|default)\b`),
 	regexp.MustCompile(`\b(read|Read|write|Write|send|Send|recv|receive|Receive|fetch|Fetch|request|Request|exec|Exec|spawn|open|Open|close|Close|dispose|Dispose|commit|Commit|rollback|Rollback)\b`),
 }
 
