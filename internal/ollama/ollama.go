@@ -42,6 +42,15 @@ func (c *Client) WithThink(think any) *Client {
 	return &cp
 }
 
+func (c *Client) WithMinPredict(n int) *Client {
+	if c.numPredict >= n {
+		return c
+	}
+	cp := *c
+	cp.numPredict = n
+	return &cp
+}
+
 func (c *Client) WithLowThink() *Client {
 	if s, ok := c.think.(string); ok && s != "" {
 		return c.WithThink("low")

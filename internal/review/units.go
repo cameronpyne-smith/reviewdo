@@ -62,6 +62,7 @@ const (
 	maxUnitCallers = 1500
 	maxUnits       = 40
 	unitCallTime   = 3 * time.Minute
+	unitPredict    = 32768
 )
 
 var codeExt = map[string]bool{
@@ -85,6 +86,7 @@ type unit struct {
 	start   int
 	end     int
 	changed int
+	risk    int
 	text    string
 }
 
@@ -318,9 +320,15 @@ func Units(ctx context.Context, repo Repo, files []*diff.File, ignore, only []st
 	if len(only) > 0 {
 		all = selectUnits(all, only)
 	}
+	for _, u := range all {
+		u.risk = risk(u.text)
+	}
 	sort.SliceStable(all, func(i, j int) bool {
 		if (all[i].name == "") != (all[j].name == "") {
 			return all[i].name != ""
+		}
+		if all[i].risk != all[j].risk {
+			return all[i].risk > all[j].risk
 		}
 		return all[i].changed > all[j].changed
 	})
@@ -328,6 +336,27 @@ func Units(ctx context.Context, repo Repo, files []*diff.File, ignore, only []st
 		all = all[:maxUnits]
 	}
 	return all
+}
+
+var riskRes = []*regexp.Regexp{
+	regexp.MustCompile(`\b(await|async|spawn|Task|Thread|lock|Lock|Mutex|mutex|Semaphore|select!|chan|channel|atomic|Interlocked)\b`),
+	regexp.MustCompile(`\b(retry|Retry|timeout|Timeout|deadline|Deadline|sleep|Sleep|Duration|TimeSpan|setTimeout|Instant|now\(\)|Now)\b`),
+	regexp.MustCompile(`\b(catch|except|rescue|Err|err|error|Error|unwrap|expect|panic|throw|raise|fail|Fail)\b`),
+	regexp.MustCompile(`\b(parse|Parse|decode|Decode|deserialize|Deserialize|split|Split|slice|Slice|substring|Substring|indexOf|IndexOf|trim|Trim|match|Match|regex|Regex|RegExp)\b`),
+	regexp.MustCompile(`\b(while|loop|continue|break|yield|return null|nil|None|undefined|default)\b`),
+	regexp.MustCompile(`\b(read|Read|write|Write|send|Send|recv|receive|Receive|fetch|Fetch|request|Request|exec|Exec|spawn|open|Open|close|Close|dispose|Dispose|commit|Commit|rollback|Rollback)\b`),
+}
+
+func risk(text string) int {
+	n := 0
+	for _, line := range strings.Split(text, "\n") {
+		for _, re := range riskRes {
+			if re.MatchString(line) {
+				n++
+			}
+		}
+	}
+	return n
 }
 
 func selectUnits(units []*unit, only []string) []*unit {
@@ -385,7 +414,7 @@ func DescribeUnits(units []*unit, calls [][]*unit) string {
 		}
 		fmt.Fprintf(&b, "call %d (%d KB):\n", i+1, (size+512)>>10)
 		for _, u := range call {
-			fmt.Fprintf(&b, "  - %s: %d changed lines, %d bytes\n", u.label(), u.changed, len(u.text))
+			fmt.Fprintf(&b, "  - %s: risk %d, %d changed lines, %d bytes\n", u.label(), u.risk, u.changed, len(u.text))
 		}
 	}
 	return b.String()
@@ -403,7 +432,7 @@ type unitResult struct {
 func reviewUnitCall(ctx context.Context, llm *ollama.Client, call []*unit, log *slog.Logger) ([]Comment, Stats, error) {
 	ctx, cancel := context.WithTimeout(ctx, unitCallTime)
 	defer cancel()
-	raw, st, err := RunSingle(ctx, llm, UnitPrompt, UnitInput(call), UnitSchema)
+	raw, st, err := RunSingle(ctx, llm.WithMinPredict(unitPredict), UnitPrompt, UnitInput(call), UnitSchema)
 	if err != nil {
 		return nil, st, err
 	}

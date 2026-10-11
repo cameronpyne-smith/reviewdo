@@ -133,3 +133,11 @@ func TestAddCommentsDropsNearDuplicates(t *testing.T) {
 		t.Errorf("added %d, len %d", added, len(out))
 	}
 }
+
+func TestRiskCountsLinesThatCanGoWrong(t *testing.T) {
+	plain := "func a() int {\n\treturn 1\n}\n"
+	risky := "func b() error {\n\tfor {\n\t\tif err := conn.Read(buf); err != nil {\n\t\t\tbreak\n\t\t}\n\t}\n\treturn nil\n}\n"
+	if risk(plain) != 0 || risk(risky) < 3 {
+		t.Errorf("risk plain=%d risky=%d", risk(plain), risk(risky))
+	}
+}

@@ -520,14 +520,24 @@ func (p *Poller) ReviewAt(ctx context.Context, repoCfg config.Repo, pull *github
 	reserve := budget * 2 / 5
 	deep := repo != nil && (len(p.Units) > 0 || p.cfg.Review.Units != nil && *p.cfg.Review.Units)
 	finder := budget - reserve
-	if deep {
-		finder /= 2
-	}
 	perPart := finder / time.Duration(len(groups))
 	hard := start.Add(p.cfg.Review.Timeout.Duration)
 	if d, ok := ctx.Deadline(); ok && d.Before(hard) {
 		hard = d
 	}
+	var deepComments []review.Comment
+	if deep {
+		deadline := start.Add(p.cfg.Review.UnitsTime.Duration)
+		if last := hard.Add(-budget); deadline.After(last) {
+			deadline = last
+		}
+		units := review.Units(ctx, repo, promptFiles, p.cfg.Review.Ignore, p.Units)
+		oc := review.ReviewUnits(ctx, p.llm, units, deadline, log)
+		total.Merge(oc.Stats)
+		deepComments = oc.Comments
+		log.Info("deep pass", "units", oc.Units, "calls", oc.Calls, "reviewed", oc.Reviewed, "findings", len(oc.Comments), "took", time.Since(start).Round(time.Second))
+	}
+	finderStart := time.Now()
 	skipped := 0
 	for i, group := range groups {
 		if len(p.Units) > 0 {
@@ -539,7 +549,7 @@ func (p *Poller) ReviewAt(ctx context.Context, repoCfg config.Repo, pull *github
 			log.Warn("no time left, skipping remaining parts", "reviewed", i, "skipped", skipped)
 			break
 		}
-		lim.Deadline = start.Add(perPart * time.Duration(i+1))
+		lim.Deadline = finderStart.Add(perPart * time.Duration(i+1))
 		if floor := partStart.Add(p.cfg.Review.PartTime.Duration); floor.After(lim.Deadline) {
 			lim.Deadline = floor
 		}
@@ -605,22 +615,10 @@ func (p *Poller) ReviewAt(ctx context.Context, repoCfg config.Repo, pull *github
 	var rejected []review.Comment
 	adjusted := false
 
-	if deep && time.Now().Before(hard.Add(-reserve)) {
-		deadline := start.Add(budget - reserve)
-		if floor := time.Now().Add(p.cfg.Review.PartTime.Duration); floor.After(deadline) {
-			deadline = floor
-		}
-		if last := hard.Add(-reserve); deadline.After(last) {
-			deadline = last
-		}
-		deadline = deadline.Add(-20 * time.Second)
-		deepStart := time.Now()
-		units := review.Units(ctx, repo, promptFiles, p.cfg.Review.Ignore, p.Units)
-		oc := review.ReviewUnits(ctx, p.llm, units, deadline, log)
-		total.Merge(oc.Stats)
+	if len(deepComments) > 0 {
 		var added int
-		res.Comments, added = review.AddComments(res.Comments, oc.Comments)
-		log.Info("deep pass", "units", oc.Units, "calls", oc.Calls, "reviewed", oc.Reviewed, "findings", len(oc.Comments), "added", added, "took", time.Since(deepStart).Round(time.Second))
+		res.Comments, added = review.AddComments(res.Comments, deepComments)
+		log.Info("deep pass findings merged", "findings", len(deepComments), "added", added)
 	}
 
 	if repo != nil && time.Now().Before(hard.Add(-reserve/2)) {
@@ -672,7 +670,7 @@ func (p *Poller) ReviewAt(ctx context.Context, repoCfg config.Repo, pull *github
 		changed := review.ChangedSpans(files)
 		var kept []review.Comment
 		unverified := 0
-		verifyDeadline := start.Add(budget)
+		verifyDeadline := finderStart.Add(budget)
 		if floor := time.Now().Add(reserve); floor.After(verifyDeadline) {
 			verifyDeadline = floor
 		}

@@ -50,18 +50,21 @@ reads anything else by line range, so a few large files cannot fill the
 context window. Without `clone_dir`, reviews use the diff alone.
 
 Large pull requests are reviewed in parts of related files, each with full
-tool access, then merged. With `review.units` on, a deep pass then takes
-each changed function in the code files (tests, examples and documentation
-excluded), shown whole with line numbers, in small groups, and asks the
-model in a single call with no tools to state each function's contract and
-then find one concrete sequence of events that breaks it. The largest
-changes go first, so a pull request too big for the time budget still gets
-its main functions examined. The question is deliberately bare: on the
-benchmark a reviewer framing, a list of cases to check, an instruction to
-report only what the code shows, changed-line markers or a list of callers
-each turned the answer into "no break found" on a function with a planted
-bug. The noise the bare question produces is what triage and verification
-remove. It is off by default. When the repository has instruction files, a
+tool access, then merged. With `review.units` on, a deep pass runs first,
+with its own time budget (`review.units_time`): it takes each changed
+function in the code files (tests, examples and documentation excluded),
+shown whole with line numbers, in small groups, and asks the model in a
+single call with no tools to state each function's contract and then find
+one concrete sequence of events that breaks it. Functions are ranked by how
+many of their lines do something that can go wrong (I/O, concurrency,
+timing, error handling, parsing, loops), so a pull request too big for the
+budget still gets its riskiest functions examined. The question is
+deliberately bare: on the benchmark a reviewer framing, a list of cases to
+check, an instruction to report only what the code shows, the pull request
+description, changed-line markers or a list of callers each turned the
+answer into "no break found" on a function with a planted bug. The noise
+the bare question produces is what triage and verification remove. The
+whole-PR pass then runs with its full budget. It is off by default. When the repository has instruction files, a
 separate pass with no tools checks every added line against them and
 reports each breach with the rule quoted; a quote that does not appear in
 the instructions is discarded. A triage pass drops findings that say nothing
@@ -201,7 +204,8 @@ See `deploy/config.example.json`. Fields:
 | `review.part_time` | `2m` | minimum time for each part, so a large PR is read properly even when it overruns the budget |
 | `review.triage` | `true` | one fast model call before verification that drops findings which say nothing concrete (reassurance, "please verify", generic advice) and sets each finding's severity from fixed definitions |
 | `review.verify` | `true` | verify every finding with a second pass before posting, highest severity first |
-| `review.units` | `false` | the deep pass over changed functions; it takes half of the time left after verification's reserve |
+| `review.units` | `false` | the deep pass over changed functions, run before the whole-PR pass |
+| `review.units_time` | `time_budget` | time budget for the deep pass, on top of `time_budget` |
 | `review.time_budget` | `5m` | target duration for one review; parts and verification are cut short to fit |
 | `review.timeout` | `3 × time_budget` | hard deadline, after which the review is abandoned |
 | `review.max_output_tokens` | `48000` | total output tokens per review before the final answer is forced |
