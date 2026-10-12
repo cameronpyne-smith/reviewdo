@@ -519,8 +519,6 @@ func (p *Poller) ReviewAt(ctx context.Context, repoCfg config.Repo, pull *github
 	budget := p.cfg.Review.TimeBudget.Duration
 	reserve := budget * 2 / 5
 	deep := repo != nil && (len(p.Units) > 0 || p.cfg.Review.Units != nil && *p.cfg.Review.Units)
-	finder := budget - reserve
-	perPart := finder / time.Duration(len(groups))
 	hard := start.Add(p.cfg.Review.Timeout.Duration)
 	if d, ok := ctx.Deadline(); ok && d.Before(hard) {
 		hard = d
@@ -538,9 +536,18 @@ func (p *Poller) ReviewAt(ctx context.Context, repoCfg config.Repo, pull *github
 		log.Info("deep pass", "units", oc.Units, "calls", oc.Calls, "reviewed", oc.Reviewed, "findings", len(oc.Comments), "took", time.Since(start).Round(time.Second))
 	}
 	finderStart := time.Now()
+	finder := budget - reserve
+	if need := time.Duration(len(deepComments)) * verifyEach; need > reserve {
+		finder = budget - min(need, budget)
+	}
+	perPart := finder / time.Duration(len(groups))
 	skipped := 0
+	wholePass := len(p.Units) == 0 && (!deep || finder >= p.cfg.Review.PartTime.Duration)
+	if !wholePass && deep {
+		log.Info("whole-PR pass skipped, the deep pass findings need the budget to verify", "findings", len(deepComments))
+	}
 	for i, group := range groups {
-		if len(p.Units) > 0 {
+		if !wholePass {
 			break
 		}
 		partStart := time.Now()
@@ -607,7 +614,7 @@ func (p *Poller) ReviewAt(ctx context.Context, repoCfg config.Repo, pull *github
 		log.Info("part reviewed", "part", i+1, "of", len(groups), "verdict", res.Verdict, "findings", len(res.Comments), "rounds", st.Rounds, "tool_calls", st.ToolCalls, "took", st.Duration.Round(time.Second))
 		parts = append(parts, res)
 	}
-	if len(parts) == 0 && len(p.Units) == 0 {
+	if len(parts) == 0 && wholePass {
 		return nil, errors.New("every part of the review failed")
 	}
 	res := review.Merge(parts)
@@ -736,6 +743,8 @@ func (p *Poller) ReviewAt(ctx context.Context, repoCfg config.Repo, pull *github
 	out := review.Render(res, files, scope, p.cfg.Review.MaxComments, p.botSlug, p.cfg.Label)
 	return &Outcome{Result: res, Output: out, Files: files, Scope: scope, Rejected: rejected, Stats: total, Parts: len(parts), Took: time.Since(start), DiffOnly: repo == nil}, nil
 }
+
+const verifyEach = 45 * time.Second
 
 func (p *Poller) incrementalDiff(ctx context.Context, repo, from, to string) []*diff.File {
 	cmp, err := p.gh.Compare(ctx, repo, from, to)
