@@ -79,7 +79,7 @@ func TestUnitsSplitsAtFunctionsAndMarksChanges(t *testing.T) {
 }
 
 func TestUnitsSkipsTestsAndNonCode(t *testing.T) {
-	repo := outlineRepo{treeRepo{"a_test.go": unitsFile, "Proj.Tests/X.cs": "x", "docs/a.md": "# a", "examples/e.py": "def e():\n    pass\n"}}
+	repo := outlineRepo{treeRepo{"a_test.go": unitsFile, "Proj.Tests/X.cs": "x", "docs/a.md": "# a", "examples/e.py": "def e():\n    pass\n", "src/sync/shutdown_tests.rs": "fn a() {}\n", "src/sync/position/tests.rs": "fn b() {}\n"}}
 	var files []*diff.File
 	for p := range repo.treeRepo {
 		files = append(files, &diff.File{Path: p, Hunks: []diff.Hunk{{Lines: []diff.Line{{Kind: '+', Text: "x", NewNo: 1}}}}})
@@ -139,5 +139,19 @@ func TestRiskCountsLinesThatCanGoWrong(t *testing.T) {
 	risky := "func b() error {\n\tfor {\n\t\tif err := conn.Read(buf); err != nil {\n\t\t\tbreak\n\t\t}\n\t}\n\treturn nil\n}\n"
 	if risk(plain) != 0 || risk(risky) < 3 {
 		t.Errorf("risk plain=%d risky=%d", risk(plain), risk(risky))
+	}
+}
+
+func TestUnitsStopAtRustTestModule(t *testing.T) {
+	src := "#[cfg(test)]\nmod other_tests;\n\nfn live(a: i32) -> i32 {\n    a + 1\n}\n\n#[cfg(test)]\nmod tests {\n    #[test]\n    fn t() {\n        assert_eq!(super::live(1), 2);\n    }\n}\n"
+	repo := outlineRepo{treeRepo{"src/lib.rs": src}}
+	var lines []diff.Line
+	for i := 1; i <= 14; i++ {
+		lines = append(lines, diff.Line{Kind: '+', Text: "x", NewNo: i})
+	}
+	files := []*diff.File{{Path: "src/lib.rs", Hunks: []diff.Hunk{{Lines: lines}}}}
+	units := Units(context.Background(), repo, files, nil, nil)
+	if len(units) != 1 || units[0].start != 1 || units[0].end != 7 {
+		t.Fatalf("expected one unit before the test module, got %+v", units)
 	}
 }

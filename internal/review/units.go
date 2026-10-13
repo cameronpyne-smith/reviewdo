@@ -75,7 +75,9 @@ var codeExt = map[string]bool{
 
 var (
 	testDir      = regexp.MustCompile(`(?i)(^|/|\.)(tests?|__tests__|specs?|testing|fixtures?|mocks?|testdata|examples?|samples?|docs?)/`)
-	testFile     = regexp.MustCompile(`(?i)(_test\.\w+|\.test\.\w+|\.spec\.\w+|tests?\.(cs|fs|py|rb|java|kt|scala|swift)|test_[^/]*\.py)$`)
+	testFile     = regexp.MustCompile(`(?i)(_tests?\.\w+|\.test\.\w+|\.spec\.\w+|tests?\.(cs|fs|py|rb|java|kt|scala|swift|rs)|test_[^/]*\.py)$`)
+	rustTestAttr = regexp.MustCompile(`^\s*#\[cfg\(test\)\]`)
+	rustTestMod  = regexp.MustCompile(`^\s*(pub(\([a-z]+\))?\s+)?mod\s+\w+\s*\{`)
 	decoratorRe  = regexp.MustCompile(`^\s*(@[A-Za-z_][\w.]*|\[[A-Z][\w.]*(\(.*\))?\])\s*$`)
 	outlineEntry = regexp.MustCompile(`^(\d+): (.*)$`)
 )
@@ -252,10 +254,15 @@ func fileUnits(ctx context.Context, repo Repo, f *diff.File) []*unit {
 	if len(lines) == 0 {
 		return nil
 	}
+	lines = beforeTests(f.Path, lines)
 	c := changesOf(f)
 	var starts []int
 	if outline, err := repo.Outline(ctx, f.Path); err == nil {
-		starts = boundaries(outline, lines)
+		for _, s := range boundaries(outline, lines) {
+			if s <= len(lines) {
+				starts = append(starts, s)
+			}
+		}
 	}
 	var units []*unit
 	add := func(start, end int) {
@@ -283,6 +290,18 @@ func fileUnits(ctx context.Context, repo Repo, f *diff.File) []*unit {
 		add(s, end)
 	}
 	return coalesce(units, lines, c)
+}
+
+func beforeTests(p string, lines []string) []string {
+	if strings.ToLower(path.Ext(p)) != ".rs" {
+		return lines
+	}
+	for i, l := range lines {
+		if rustTestAttr.MatchString(l) && i+1 < len(lines) && rustTestMod.MatchString(lines[i+1]) {
+			return lines[:i]
+		}
+	}
+	return lines
 }
 
 func coalesce(units []*unit, lines []string, c fileChanges) []*unit {
