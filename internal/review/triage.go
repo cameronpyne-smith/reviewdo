@@ -10,7 +10,7 @@ import (
 	"github.com/cameronpyne-smith/reviewdo/internal/ollama"
 )
 
-const TriagePrompt = `You are the editor of an automated code review. You are given the pull request details and the draft findings. Decide for each finding whether it is worth the author's attention. You are not judging whether a finding is true; a separate check does that. You are judging whether it says anything.
+const TriagePrompt = `You are the editor of an automated code review. You are given the pull request details and the draft findings. Decide for each finding whether it is worth the author's attention. You are not judging whether a finding is true; a separate check does that. You are judging whether it says anything. ` + Untrusted + `
 
 Drop a finding when it:
 - concludes there is no problem, or only describes or explains what the code does;

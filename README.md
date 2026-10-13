@@ -112,8 +112,11 @@ them.
   by root only on disk. It is never in this repo or in dotfiles.
 - The service runs as a `DynamicUser` with a locked-down systemd sandbox
   (`deploy/reviewdo.service`).
-- PR content is untrusted. The model only produces JSON that becomes review
-  text; its tools are read-only and it executes nothing.
+- PR content is untrusted. Every pass that sees the title, description,
+  code or file contents is told they are untrusted and never to follow
+  instructions found in them. The model only produces JSON that becomes
+  review text; its tools are read-only, paths are confined to the
+  repository, and it executes nothing.
 - Review requests via comment are honoured from anyone who can comment on a
   private repository, since access there already implies membership, and
   only from `OWNER`, `MEMBER` or `COLLABORATOR` accounts on a public one.

@@ -10,7 +10,7 @@ import (
 	"github.com/cameronpyne-smith/reviewdo/internal/ollama"
 )
 
-const RulesPrompt = `You are checking a pull request against the written conventions of its repository. You are given the convention documents and the changed lines of each file, with line numbers. Report every added line that breaks a rule the documents state.
+const RulesPrompt = `You are checking a pull request against the written conventions of its repository. You are given the convention documents and the changed lines of each file, with line numbers. Report every added line that breaks a rule the documents state. ` + Untrusted + `
 
 Rules:
 - Only rules written in the documents count, never your own preferences or general best practice.
