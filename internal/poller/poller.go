@@ -534,7 +534,11 @@ func (p *Poller) ReviewAt(ctx context.Context, repoCfg config.Repo, pull *github
 			deadline = last
 		}
 		units := review.Units(ctx, repo, promptFiles, p.cfg.Review.Ignore, p.Units)
-		oc := review.ReviewUnits(ctx, p.llm, units, p.cfg.Review.UnitsDraws, deadline, log)
+		var draws []review.DrawSpec
+		for _, d := range p.cfg.Review.UnitsDraws {
+			draws = append(draws, review.DrawSpec{Question: d.Question, Temperature: d.Temperature})
+		}
+		oc := review.ReviewUnits(ctx, p.llm, units, draws, deadline, log)
 		total.Merge(oc.Stats)
 		deepComments = oc.Comments
 		log.Info("deep pass", "units", oc.Units, "calls", oc.Calls, "draws", oc.Draws, "reviewed", oc.Reviewed, "findings", len(oc.Comments), "agreed", oc.Agreed, "took", time.Since(start).Round(time.Second))

@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/json"
 	"reflect"
 	"testing"
 )
@@ -27,5 +28,15 @@ func TestResolveWildcard(t *testing.T) {
 	}
 	if r := c.RepoFor("other/repo"); r.Instructions != "" {
 		t.Errorf("RepoFor unmatched: got %+v", r)
+	}
+}
+
+func TestDrawsAcceptCountOrList(t *testing.T) {
+	var d Draws
+	if err := json.Unmarshal([]byte(`3`), &d); err != nil || len(d) != 3 {
+		t.Fatalf("count: %v %v", d, err)
+	}
+	if err := json.Unmarshal([]byte(`[{}, {"question": "exits"}, {"temperature": 0.7}]`), &d); err != nil || len(d) != 3 || d[1].Question != "exits" || d[2].Temperature == nil || *d[2].Temperature != 0.7 {
+		t.Fatalf("list: %+v %v", d, err)
 	}
 }

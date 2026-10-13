@@ -42,6 +42,12 @@ func (c *Client) WithThink(think any) *Client {
 	return &cp
 }
 
+func (c *Client) WithTemperature(t float64) *Client {
+	cp := *c
+	cp.temperature = t
+	return &cp
+}
+
 func (c *Client) WithMinPredict(n int) *Client {
 	if c.numPredict >= n {
 		return c

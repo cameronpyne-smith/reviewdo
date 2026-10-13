@@ -20,6 +20,29 @@ const UnitPrompt = `For each function, first state its contract in two sentences
 
 Severity: critical means it will certainly break, lose data or open a security hole; major means a likely bug; minor means worth fixing but not blocking; nit means optional.`
 
+const ExitsPrompt = `For each function, first state its contract in two sentences: what it promises its callers and the rest of the system. Then list every way it can stop early or fail: an error return, an exception, a timeout, a cancellation, an empty or missing input, a lock or resource not obtained. For each, say what state, resource or caller promise it leaves behind. Report the exits that leave the contract broken, with the line where it goes wrong.
+
+Severity: critical means it will certainly break, lose data or open a security hole; major means a likely bug; minor means worth fixing but not blocking; nit means optional.`
+
+type DrawSpec struct {
+	Question    string
+	Temperature *float64
+}
+
+func (d DrawSpec) prompt() string {
+	if d.Question == "exits" {
+		return ExitsPrompt
+	}
+	return UnitPrompt
+}
+
+func (d DrawSpec) client(llm *ollama.Client) *ollama.Client {
+	if d.Temperature != nil {
+		return llm.WithTemperature(*d.Temperature)
+	}
+	return llm
+}
+
 var UnitSchema = json.RawMessage(`{
   "type": "object",
   "properties": {
@@ -445,10 +468,10 @@ type unitResult struct {
 	Findings []Comment `json:"findings"`
 }
 
-func reviewUnitCall(ctx context.Context, llm *ollama.Client, call []*unit, log *slog.Logger) ([]Comment, Stats, error) {
+func reviewUnitCall(ctx context.Context, llm *ollama.Client, prompt string, call []*unit, log *slog.Logger) ([]Comment, Stats, error) {
 	ctx, cancel := context.WithTimeout(ctx, unitCallTime)
 	defer cancel()
-	raw, st, err := RunSingle(ctx, llm.WithMinPredict(unitPredict), UnitPrompt, UnitInput(call), UnitSchema)
+	raw, st, err := RunSingle(ctx, llm.WithMinPredict(unitPredict), prompt, UnitInput(call), UnitSchema)
 	if err != nil {
 		return nil, st, err
 	}
@@ -488,8 +511,11 @@ type UnitOutcome struct {
 	Stats    Stats
 }
 
-func ReviewUnits(ctx context.Context, llm *ollama.Client, units []*unit, draws int, deadline time.Time, log *slog.Logger) UnitOutcome {
-	oc := UnitOutcome{Units: len(units), Draws: max(draws, 1)}
+func ReviewUnits(ctx context.Context, llm *ollama.Client, units []*unit, draws []DrawSpec, deadline time.Time, log *slog.Logger) UnitOutcome {
+	if len(draws) == 0 {
+		draws = []DrawSpec{{}}
+	}
+	oc := UnitOutcome{Units: len(units), Draws: len(draws)}
 	index := map[*unit]int{}
 	for i, u := range units {
 		index[u] = i
@@ -513,7 +539,8 @@ draws:
 				names = append(names, u.label())
 			}
 			started := time.Now()
-			comments, st, err := reviewUnitCall(ctx, llm, call, log.With("units", i+1, "draw", d))
+			spec := draws[d-1]
+			comments, st, err := reviewUnitCall(ctx, spec.client(llm), spec.prompt(), call, log.With("units", i+1, "draw", d))
 			oc.Stats.Merge(st)
 			if d == 1 {
 				oc.Reviewed++

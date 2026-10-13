@@ -141,7 +141,7 @@ type Review struct {
 	Verify       *bool    `json:"verify"`
 	Units        *bool    `json:"units"`
 	UnitsTime    Duration `json:"units_time"`
-	UnitsDraws   int      `json:"units_draws"`
+	UnitsDraws   Draws    `json:"units_draws"`
 	TimeBudget   Duration `json:"time_budget"`
 	Timeout      Duration `json:"timeout"`
 	Ignore       []string `json:"ignore"`
@@ -235,8 +235,13 @@ func (c *Config) applyDefaults() error {
 	if c.Review.UnitsTime.Duration == 0 {
 		c.Review.UnitsTime.Duration = c.Review.TimeBudget.Duration
 	}
-	if c.Review.UnitsDraws <= 0 {
-		c.Review.UnitsDraws = 1
+	if len(c.Review.UnitsDraws) == 0 {
+		c.Review.UnitsDraws = Draws{{}}
+	}
+	for i, d := range c.Review.UnitsDraws {
+		if d.Question != "" && d.Question != "contract" && d.Question != "exits" {
+			return fmt.Errorf("review.units_draws[%d].question: unknown question %q", i, d.Question)
+		}
 	}
 	if c.Review.Timeout.Duration == 0 {
 		c.Review.Timeout.Duration = 3 * c.Review.TimeBudget.Duration
@@ -349,4 +354,28 @@ func ParseThink(s string) Think {
 		return Think{v: false}
 	}
 	return Think{v: s}
+}
+
+type Draw struct {
+	Question    string   `json:"question"`
+	Temperature *float64 `json:"temperature"`
+}
+
+type Draws []Draw
+
+func (d *Draws) UnmarshalJSON(b []byte) error {
+	var n int
+	if err := json.Unmarshal(b, &n); err == nil {
+		if n < 1 {
+			n = 1
+		}
+		*d = make(Draws, n)
+		return nil
+	}
+	var list []Draw
+	if err := json.Unmarshal(b, &list); err != nil {
+		return fmt.Errorf("units_draws must be a count or a list of draws: %w", err)
+	}
+	*d = list
+	return nil
 }
