@@ -62,6 +62,9 @@ func New(cfg *config.Config, gh *github.Client, llm *ollama.Client, st *state.St
 }
 
 func (p *Poller) Run(ctx context.Context) error {
+	if !*p.cfg.AutoReview {
+		p.log.Info("auto review is off: pull requests are reviewed only on a comment or label")
+	}
 	t := time.NewTicker(p.cfg.PollInterval.Duration)
 	defer t.Stop()
 	for {
@@ -203,12 +206,13 @@ func (p *Poller) scanRepo(ctx context.Context, repo config.Repo) ([]job, error) 
 		log.Error("comment scan failed", "err", err)
 	}
 
+	auto := *p.cfg.AutoReview
 	var jobs []job
 	for _, pull := range pulls {
 		key := strconv.Itoa(pull.Number)
 		ps := rs.Pulls[key]
 		if ps == nil {
-			ps = &state.Pull{Baselined: baseline && !pull.Draft}
+			ps = &state.Pull{Baselined: (baseline && !pull.Draft) || !auto}
 			rs.Pulls[key] = ps
 		}
 		ps.HeadSHA = pull.Head.SHA
@@ -223,7 +227,7 @@ func (p *Poller) scanRepo(ctx context.Context, repo config.Repo) ([]job, error) 
 		case pull.HasLabel(p.cfg.Label) && ps.LabelSHA != pull.Head.SHA:
 			tr = trigger{reason: "label", at: pull.UpdatedAt}
 			ps.LabelSHA = pull.Head.SHA
-		case ps.ReviewedSHA == "" && !ps.Baselined && !pull.Draft && ps.FailedSHA != pull.Head.SHA && pull.User.Type != "Bot":
+		case auto && ps.ReviewedSHA == "" && !ps.Baselined && !pull.Draft && ps.FailedSHA != pull.Head.SHA && pull.User.Type != "Bot":
 			tr = trigger{reason: "opened", at: pull.CreatedAt}
 		default:
 			continue

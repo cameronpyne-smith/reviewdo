@@ -85,7 +85,11 @@ unless history was rewritten or the base branch was merged in, in which case
 the whole PR is reviewed again.
 
 On first run with no state file, PRs that are already open are not reviewed
-automatically. Use a comment or the label to review them.
+automatically. Use a comment or the label to review them. Set
+`auto_review` to `false` to never review a PR just because it was opened:
+only a comment or the label starts a review. PRs first seen while it is off
+are treated like those existing PRs, so turning it back on does not review
+them.
 
 ## Security posture
 
@@ -193,6 +197,7 @@ See `deploy/config.example.json`. Fields:
 | `clone_dir` | unset | where repositories are cloned; unset means diff-only reviews |
 | `poll_interval` | `60s` | |
 | `label` | `reviewdo` | label that triggers a review; removed afterwards |
+| `auto_review` | `true` | review PRs when they are opened; `false` reviews only on `@reviewdo-bot review` or the label |
 | `repos[].name` | | `owner/repo`, or `owner/*` for every repository the installation can reach; archived repositories are skipped and the list is refreshed every poll |
 | `instructions`, `instructions_file` | | global review guidance for every repo, inline or from a file |
 | `repos[].instructions`, `repos[].instructions_file` | | guidance for that repo only |

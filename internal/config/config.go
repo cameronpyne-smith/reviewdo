@@ -34,6 +34,7 @@ type Config struct {
 	CloneDir         string   `json:"clone_dir"`
 	PollInterval     Duration `json:"poll_interval"`
 	Label            string   `json:"label"`
+	AutoReview       *bool    `json:"auto_review"`
 	Instructions     string   `json:"instructions"`
 	InstructionsFile string   `json:"instructions_file"`
 	Repos            []Repo   `json:"repos"`
@@ -184,6 +185,10 @@ func (c *Config) applyDefaults() error {
 	}
 	if c.Label == "" {
 		c.Label = "reviewdo"
+	}
+	if c.AutoReview == nil {
+		v := true
+		c.AutoReview = &v
 	}
 	if c.Ollama.URL == "" {
 		c.Ollama.URL = "http://127.0.0.1:11434"
