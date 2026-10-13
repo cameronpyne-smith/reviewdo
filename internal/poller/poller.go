@@ -541,15 +541,9 @@ func (p *Poller) ReviewAt(ctx context.Context, repoCfg config.Repo, pull *github
 	}
 	finderStart := time.Now()
 	finder := budget - reserve
-	if need := time.Duration(len(deepComments)) * verifyEach; need > reserve {
-		finder = budget - min(need, budget)
-	}
 	perPart := finder / time.Duration(len(groups))
 	skipped := 0
-	wholePass := len(p.Units) == 0 && (!deep || finder >= p.cfg.Review.PartTime.Duration)
-	if !wholePass && deep {
-		log.Info("whole-PR pass skipped, the deep pass findings need the budget to verify", "findings", len(deepComments))
-	}
+	wholePass := len(p.Units) == 0
 	for i, group := range groups {
 		if !wholePass {
 			break
@@ -745,8 +739,6 @@ func (p *Poller) ReviewAt(ctx context.Context, repoCfg config.Repo, pull *github
 	out := review.Render(res, files, scope, p.cfg.Review.MaxComments, p.botSlug, p.cfg.Label)
 	return &Outcome{Result: res, Output: out, Files: files, Scope: scope, Rejected: rejected, Stats: total, Parts: len(parts), Took: time.Since(start), DiffOnly: repo == nil}, nil
 }
-
-const verifyEach = 45 * time.Second
 
 func (p *Poller) incrementalDiff(ctx context.Context, repo, from, to string) []*diff.File {
 	cmp, err := p.gh.Compare(ctx, repo, from, to)

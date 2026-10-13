@@ -64,10 +64,9 @@ check, an instruction to report only what the code shows, the pull request
 description, changed-line markers or a list of callers each turned the
 answer into "no break found" on a function with a planted bug. The noise
 the bare question produces is what triage and verification remove. The
-whole-PR pass then runs in what is left of `time_budget` after verification
-has claimed its share, about 45 seconds per deep-pass finding, and is skipped
-when that leaves less than `part_time`, so the findings the deep pass made are
-checked rather than dropped unverified. It is off by default. When the repository has instruction files, a
+whole-PR pass then runs with its usual share of `time_budget`, and
+verification of both passes' findings gets the rest; findings it has no
+time for are posted marked `[Unverified]`. It is off by default. When the repository has instruction files, a
 separate pass with no tools checks every added line against them and
 reports each breach with the rule quoted; a quote that does not appear in
 the instructions is discarded. A triage pass drops findings that say nothing
@@ -213,7 +212,7 @@ See `deploy/config.example.json`. Fields:
 | `review.triage` | `true` | one fast model call before verification that drops findings which say nothing concrete (reassurance, "please verify", generic advice) and sets each finding's severity from fixed definitions |
 | `review.verify` | `true` | verify every finding with a second pass before posting, highest severity first |
 | `review.units` | `false` | the deep pass over changed functions, run before the whole-PR pass |
-| `review.units_time` | `time_budget` | time budget for the deep pass, on top of `time_budget`; verification of its findings then takes first claim on `time_budget` |
+| `review.units_time` | `time_budget` | time budget for the deep pass, on top of `time_budget` |
 | `review.time_budget` | `5m` | target duration for one review; parts and verification are cut short to fit |
 | `review.timeout` | `3 × time_budget` | hard deadline, after which the review is abandoned |
 | `review.max_output_tokens` | `48000` | total output tokens per review before the final answer is forced |
