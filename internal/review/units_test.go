@@ -135,16 +135,36 @@ func TestAddCommentsDropsNearDuplicates(t *testing.T) {
 }
 
 func TestMergeDrawCountsAgreement(t *testing.T) {
-	have := mergeDraw(nil, []Comment{{Path: "a", Line: 10, Severity: "minor", Body: "short"}, {Path: "a", Line: 40, Severity: "major", Body: "other"}}, 1)
-	have = mergeDraw(have, []Comment{{Path: "a", Line: 14, Severity: "major", Body: "a longer body"}, {Path: "b", Line: 10, Severity: "nit", Body: "new"}}, 2)
-	if len(have) != 3 {
-		t.Fatalf("len = %d, want 3", len(have))
+	a := &unit{path: "a", start: 1, end: 30}
+	b := &unit{path: "a", start: 31, end: 60}
+	index := map[*unit]int{a: 0, b: 1}
+	have, owner := mergeDraw(nil, nil, []Comment{{Path: "a", Line: 10, Severity: "minor", Body: "short"}, {Path: "a", Line: 40, Severity: "major", Body: "other"}}, []*unit{a, b}, index, 1)
+	have, owner = mergeDraw(have, owner, []Comment{{Path: "a", Line: 14, Severity: "major", Body: "a longer body"}, {Path: "b", Line: 10, Severity: "nit", Body: "new"}}, []*unit{b, a}, index, 2)
+	if len(have) != 3 || len(owner) != 3 {
+		t.Fatalf("len = %d, %d, want 3", len(have), len(owner))
 	}
-	if c := have[0]; c.Draws != 2 || c.Severity != "major" || c.Line != 14 || c.Body != "a longer body" {
+	if c := have[0]; c.Draws != 2 || c.Severity != "major" || c.Line != 14 || c.Body != "a longer body" || c.FirstDraw != 1 {
 		t.Errorf("merged = %+v", c)
 	}
-	if have[1].Draws != 1 || have[2].Draws != 1 || have[0].FirstDraw != 1 || have[2].FirstDraw != 2 {
+	if have[1].Draws != 1 || have[2].Draws != 1 || have[2].FirstDraw != 2 {
 		t.Errorf("unmerged = %+v, %+v", have[1], have[2])
+	}
+	if owner[0] != 0 || owner[1] != 1 || owner[2] != 1 {
+		t.Errorf("owners = %v", owner)
+	}
+}
+
+func TestDrawOrderRotates(t *testing.T) {
+	units := []*unit{{name: "a"}, {name: "b"}, {name: "c"}, {name: "d"}, {name: "e"}, {name: "f"}}
+	got := func(d int) string {
+		var s string
+		for _, u := range drawOrder(units, d, 3) {
+			s += u.name
+		}
+		return s
+	}
+	if got(1) != "abcdef" || got(2) != "cdefab" || got(3) != "efabcd" {
+		t.Errorf("orders = %q %q %q", got(1), got(2), got(3))
 	}
 }
 

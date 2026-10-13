@@ -489,12 +489,20 @@ type UnitOutcome struct {
 }
 
 func ReviewUnits(ctx context.Context, llm *ollama.Client, units []*unit, draws int, deadline time.Time, log *slog.Logger) UnitOutcome {
-	calls := PackUnits(units, unitCallBytes)
-	oc := UnitOutcome{Units: len(units), Calls: len(calls), Draws: max(draws, 1)}
-	found := make([][]Comment, len(calls))
-	done := make([]int, len(calls))
+	oc := UnitOutcome{Units: len(units), Draws: max(draws, 1)}
+	index := map[*unit]int{}
+	for i, u := range units {
+		index[u] = i
+	}
+	seen := make([]int, len(units))
+	var found []Comment
+	var owner []int
 draws:
 	for d := 1; d <= oc.Draws; d++ {
+		calls := PackUnits(drawOrder(units, d, oc.Draws), unitCallBytes)
+		if d == 1 {
+			oc.Calls = len(calls)
+		}
 		for i, call := range calls {
 			if ctx.Err() != nil || time.Now().After(deadline) {
 				log.Warn("no time left for the deep pass, skipping the remaining calls", "draw", d, "reviewed", i, "skipped", len(calls)-i)
@@ -514,24 +522,32 @@ draws:
 				log.Warn("deep pass call failed", "draw", d, "units", names, "err", err)
 				continue
 			}
-			done[i]++
+			for _, u := range call {
+				seen[index[u]]++
+			}
 			log.Info("units reviewed", "call", i+1, "of", len(calls), "draw", d, "units", names, "findings", len(comments), "rounds", st.Rounds, "output_tokens", st.OutputTokens, "truncated", st.Truncated, "took", time.Since(started).Round(time.Second))
-			found[i] = mergeDraw(found[i], comments, d)
+			found, owner = mergeDraw(found, owner, comments, call, index, d)
 		}
 	}
-	for i, comments := range found {
-		for _, c := range comments {
-			c.OfDraws = done[i]
-			if c.Draws > 1 {
-				oc.Agreed++
-			}
-			oc.Comments = append(oc.Comments, c)
+	for i, c := range found {
+		c.OfDraws = seen[owner[i]]
+		if c.Draws > 1 {
+			oc.Agreed++
 		}
+		oc.Comments = append(oc.Comments, c)
 	}
 	return oc
 }
 
-func mergeDraw(have, more []Comment, draw int) []Comment {
+func drawOrder(units []*unit, draw, draws int) []*unit {
+	off := (draw - 1) * len(units) / draws
+	if off == 0 {
+		return units
+	}
+	return append(append([]*unit{}, units[off:]...), units[:off]...)
+}
+
+func mergeDraw(have []Comment, owner []int, more []Comment, call []*unit, index map[*unit]int, draw int) ([]Comment, []int) {
 	for _, m := range more {
 		merged := false
 		for i := range have {
@@ -549,12 +565,28 @@ func mergeDraw(have, more []Comment, draw int) []Comment {
 			merged = true
 			break
 		}
-		if !merged {
-			m.Draws, m.FirstDraw = 1, draw
-			have = append(have, m)
+		if merged {
+			continue
+		}
+		m.Draws, m.FirstDraw = 1, draw
+		have = append(have, m)
+		owner = append(owner, index[unitOf(call, m)])
+	}
+	return have, owner
+}
+
+func unitOf(call []*unit, c Comment) *unit {
+	for _, u := range call {
+		if u.path == c.Path && u.start <= c.Line && c.Line <= u.end {
+			return u
 		}
 	}
-	return have
+	for _, u := range call {
+		if u.path == c.Path {
+			return u
+		}
+	}
+	return call[0]
 }
 
 func AddComments(comments, more []Comment) ([]Comment, int) {
