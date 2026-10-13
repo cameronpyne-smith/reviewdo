@@ -141,6 +141,7 @@ type Review struct {
 	Verify       *bool    `json:"verify"`
 	Units        *bool    `json:"units"`
 	UnitsTime    Duration `json:"units_time"`
+	UnitsDraws   int      `json:"units_draws"`
 	TimeBudget   Duration `json:"time_budget"`
 	Timeout      Duration `json:"timeout"`
 	Ignore       []string `json:"ignore"`
@@ -233,6 +234,9 @@ func (c *Config) applyDefaults() error {
 	}
 	if c.Review.UnitsTime.Duration == 0 {
 		c.Review.UnitsTime.Duration = c.Review.TimeBudget.Duration
+	}
+	if c.Review.UnitsDraws <= 0 {
+		c.Review.UnitsDraws = 1
 	}
 	if c.Review.Timeout.Duration == 0 {
 		c.Review.Timeout.Duration = 3 * c.Review.TimeBudget.Duration

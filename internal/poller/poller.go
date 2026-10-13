@@ -534,10 +534,10 @@ func (p *Poller) ReviewAt(ctx context.Context, repoCfg config.Repo, pull *github
 			deadline = last
 		}
 		units := review.Units(ctx, repo, promptFiles, p.cfg.Review.Ignore, p.Units)
-		oc := review.ReviewUnits(ctx, p.llm, units, deadline, log)
+		oc := review.ReviewUnits(ctx, p.llm, units, p.cfg.Review.UnitsDraws, deadline, log)
 		total.Merge(oc.Stats)
 		deepComments = oc.Comments
-		log.Info("deep pass", "units", oc.Units, "calls", oc.Calls, "reviewed", oc.Reviewed, "findings", len(oc.Comments), "took", time.Since(start).Round(time.Second))
+		log.Info("deep pass", "units", oc.Units, "calls", oc.Calls, "draws", oc.Draws, "reviewed", oc.Reviewed, "findings", len(oc.Comments), "agreed", oc.Agreed, "took", time.Since(start).Round(time.Second))
 	}
 	finderStart := time.Now()
 	finder := budget - reserve

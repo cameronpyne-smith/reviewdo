@@ -74,3 +74,18 @@ func TestRenderUnverifiedBadge(t *testing.T) {
 		}
 	}
 }
+
+func TestRenderDrawsLine(t *testing.T) {
+	files := []*diff.File{{Path: "a.cs", Hunks: []diff.Hunk{{Lines: []diff.Line{{Kind: '+', Text: "x", NewNo: 10}}}}}}
+	res := &Result{Summary: "s", Comments: []Comment{
+		{Path: "a.cs", Line: 10, Severity: "major", Title: "T", Body: "Body.", Draws: 2, OfDraws: 3},
+		{Path: "a.cs", Line: 99, Severity: "minor", Title: "U", Body: "Once.", Draws: 1, OfDraws: 1},
+	}}
+	out := Render(res, files, Scope{ToSHA: "abc1234"}, 15, "b", "l")
+	if !strings.HasSuffix(out.Comments[0].Body, "Body.\n\n<sub>Found in 2 of 3 draws.</sub>") {
+		t.Errorf("inline body = %q", out.Comments[0].Body)
+	}
+	if strings.Contains(out.Body, "of 1 draws") {
+		t.Errorf("single draw should not be annotated:\n%s", out.Body)
+	}
+}

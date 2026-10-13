@@ -63,6 +63,7 @@ const (
 	maxUnits       = 40
 	unitCallTime   = 3 * time.Minute
 	unitPredict    = 32768
+	drawLines      = 5
 )
 
 var codeExt = map[string]bool{
@@ -483,35 +484,80 @@ func reviewUnitCall(ctx context.Context, llm *ollama.Client, call []*unit, log *
 type UnitOutcome struct {
 	Units    int
 	Calls    int
+	Draws    int
 	Reviewed int
+	Agreed   int
 	Comments []Comment
 	Stats    Stats
 }
 
-func ReviewUnits(ctx context.Context, llm *ollama.Client, units []*unit, deadline time.Time, log *slog.Logger) UnitOutcome {
+func ReviewUnits(ctx context.Context, llm *ollama.Client, units []*unit, draws int, deadline time.Time, log *slog.Logger) UnitOutcome {
 	calls := PackUnits(units, unitCallBytes)
-	oc := UnitOutcome{Units: len(units), Calls: len(calls)}
-	for i, call := range calls {
-		if ctx.Err() != nil || time.Now().After(deadline) {
-			log.Warn("no time left for the deep pass, skipping the remaining calls", "reviewed", i, "skipped", len(calls)-i)
-			break
+	oc := UnitOutcome{Units: len(units), Calls: len(calls), Draws: max(draws, 1)}
+	found := make([][]Comment, len(calls))
+	done := make([]int, len(calls))
+draws:
+	for d := 1; d <= oc.Draws; d++ {
+		for i, call := range calls {
+			if ctx.Err() != nil || time.Now().After(deadline) {
+				log.Warn("no time left for the deep pass, skipping the remaining calls", "draw", d, "reviewed", i, "skipped", len(calls)-i)
+				break draws
+			}
+			var names []string
+			for _, u := range call {
+				names = append(names, u.label())
+			}
+			started := time.Now()
+			comments, st, err := reviewUnitCall(ctx, llm, call, log.With("units", i+1, "draw", d))
+			oc.Stats.Merge(st)
+			if d == 1 {
+				oc.Reviewed++
+			}
+			if err != nil {
+				log.Warn("deep pass call failed", "draw", d, "units", names, "err", err)
+				continue
+			}
+			done[i]++
+			log.Info("units reviewed", "call", i+1, "of", len(calls), "draw", d, "units", names, "findings", len(comments), "rounds", st.Rounds, "output_tokens", st.OutputTokens, "truncated", st.Truncated, "took", time.Since(started).Round(time.Second))
+			found[i] = mergeDraw(found[i], comments)
 		}
-		var names []string
-		for _, u := range call {
-			names = append(names, u.label())
+	}
+	for i, comments := range found {
+		for _, c := range comments {
+			c.OfDraws = done[i]
+			if c.Draws > 1 {
+				oc.Agreed++
+			}
+			oc.Comments = append(oc.Comments, c)
 		}
-		started := time.Now()
-		comments, st, err := reviewUnitCall(ctx, llm, call, log.With("units", i+1))
-		oc.Stats.Merge(st)
-		oc.Reviewed++
-		if err != nil {
-			log.Warn("deep pass call failed", "units", names, "err", err)
-			continue
-		}
-		log.Info("units reviewed", "call", i+1, "of", len(calls), "units", names, "findings", len(comments), "rounds", st.Rounds, "output_tokens", st.OutputTokens, "truncated", st.Truncated, "took", time.Since(started).Round(time.Second))
-		oc.Comments = append(oc.Comments, comments...)
 	}
 	return oc
+}
+
+func mergeDraw(have, more []Comment) []Comment {
+	for _, m := range more {
+		merged := false
+		for i := range have {
+			c := &have[i]
+			if c.Path != m.Path || abs(c.Line-m.Line) > drawLines {
+				continue
+			}
+			c.Draws++
+			if severityRank[m.Severity] < severityRank[c.Severity] {
+				c.Severity = m.Severity
+			}
+			if len(m.Body) > len(c.Body) {
+				c.Line, c.Quote, c.Title, c.Body = m.Line, m.Quote, m.Title, m.Body
+			}
+			merged = true
+			break
+		}
+		if !merged {
+			m.Draws = 1
+			have = append(have, m)
+		}
+	}
+	return have
 }
 
 func AddComments(comments, more []Comment) ([]Comment, int) {

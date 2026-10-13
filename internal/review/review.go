@@ -231,6 +231,8 @@ type Comment struct {
 	Body     string `json:"body"`
 
 	Unverified bool `json:"-"`
+	Draws      int  `json:"-"`
+	OfDraws    int  `json:"-"`
 }
 
 type FileSummary struct {
@@ -468,6 +470,9 @@ func Render(res *Result, files []*diff.File, scope Scope, maxComments int, botSl
 		c.Body = strings.TrimSpace(c.Body)
 		if c.Body == "" {
 			continue
+		}
+		if c.OfDraws > 1 {
+			c.Body = fmt.Sprintf("%s\n\n<sub>Found in %d of %d draws.</sub>", c.Body, c.Draws, c.OfDraws)
 		}
 		if _, ok := severityRank[c.Severity]; !ok {
 			c.Severity = "minor"

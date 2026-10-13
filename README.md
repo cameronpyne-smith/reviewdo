@@ -58,7 +58,10 @@ single call with no tools to state each function's contract and then find
 one concrete sequence of events that breaks it. Functions are ranked by how
 many of their lines do something that can go wrong (I/O, concurrency,
 timing, error handling, parsing, loops), so a pull request too big for the
-budget still gets its riskiest functions examined. The question is
+budget still gets its riskiest functions examined. One draw misses what
+another finds, so `review.units_draws` asks each group again, every group
+once before any twice, and merges the answers, noting under each finding
+how many draws produced it. The question is
 deliberately bare: on the benchmark a reviewer framing, a list of cases to
 check, an instruction to report only what the code shows, the pull request
 description, changed-line markers or a list of callers each turned the
@@ -213,6 +216,7 @@ See `deploy/config.example.json`. Fields:
 | `review.verify` | `true` | verify every finding with a second pass before posting, highest severity first |
 | `review.units` | `false` | the deep pass over changed functions, run before the whole-PR pass |
 | `review.units_time` | `time_budget` | time budget for the deep pass, on top of `time_budget` |
+| `review.units_draws` | `1` | times each deep-pass bundle is asked; findings from different draws within 5 lines merge and carry how many draws found them |
 | `review.time_budget` | `5m` | target duration for one review; parts and verification are cut short to fit |
 | `review.timeout` | `3 × time_budget` | hard deadline, after which the review is abandoned |
 | `review.max_output_tokens` | `48000` | total output tokens per review before the final answer is forced |

@@ -134,6 +134,20 @@ func TestAddCommentsDropsNearDuplicates(t *testing.T) {
 	}
 }
 
+func TestMergeDrawCountsAgreement(t *testing.T) {
+	have := mergeDraw(nil, []Comment{{Path: "a", Line: 10, Severity: "minor", Body: "short"}, {Path: "a", Line: 40, Severity: "major", Body: "other"}})
+	have = mergeDraw(have, []Comment{{Path: "a", Line: 14, Severity: "major", Body: "a longer body"}, {Path: "b", Line: 10, Severity: "nit", Body: "new"}})
+	if len(have) != 3 {
+		t.Fatalf("len = %d, want 3", len(have))
+	}
+	if c := have[0]; c.Draws != 2 || c.Severity != "major" || c.Line != 14 || c.Body != "a longer body" {
+		t.Errorf("merged = %+v", c)
+	}
+	if have[1].Draws != 1 || have[2].Draws != 1 {
+		t.Errorf("unmerged draws = %d, %d", have[1].Draws, have[2].Draws)
+	}
+}
+
 func TestRiskCountsLinesThatCanGoWrong(t *testing.T) {
 	plain := "func a() int {\n\treturn 1\n}\n"
 	risky := "func b() error {\n\tfor {\n\t\tif err := conn.Read(buf); err != nil {\n\t\t\tbreak\n\t\t}\n\t}\n\treturn nil\n}\n"
