@@ -24,13 +24,20 @@ const ExitsPrompt = `For each function, first state its contract in two sentence
 
 Severity: critical means it will certainly break, lose data or open a security hole; major means a likely bug; minor means worth fixing but not blocking; nit means optional.`
 
+const InputsPrompt = `For each function, first state its contract in two sentences: what it promises its callers and the rest of the system. Then list the inputs and situations it does not handle: empty, missing, malformed, boundary or oversized values, repeated or out-of-order calls, concurrent callers, a clock or counter that has moved. For each, say what the function does with it. Report the ones where what it does breaks the contract, with the line where it goes wrong.
+
+Severity: critical means it will certainly break, lose data or open a security hole; major means a likely bug; minor means worth fixing but not blocking; nit means optional.`
+
 type DrawSpec struct {
 	Question    string
 	Temperature *float64
 }
 
 func (d DrawSpec) prompt() string {
-	if d.Question == "exits" {
+	switch d.Question {
+	case "inputs":
+		return InputsPrompt
+	case "exits":
 		return ExitsPrompt
 	}
 	return UnitPrompt

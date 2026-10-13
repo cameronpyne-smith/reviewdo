@@ -239,7 +239,7 @@ func (c *Config) applyDefaults() error {
 		c.Review.UnitsDraws = Draws{{}}
 	}
 	for i, d := range c.Review.UnitsDraws {
-		if d.Question != "" && d.Question != "contract" && d.Question != "exits" {
+		if d.Question != "" && d.Question != "contract" && d.Question != "inputs" && d.Question != "exits" {
 			return fmt.Errorf("review.units_draws[%d].question: unknown question %q", i, d.Question)
 		}
 	}
