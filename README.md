@@ -161,6 +161,7 @@ reviewdo bench propose -since 2026-07-01 -n 10 -write                      # pic
 reviewdo -config config.json bench run -label base [-model m -think t]     # review and score the set
 reviewdo -config config.json bench run -label probe -only r#N -units f.rs:39 # deep pass only, on the functions at these lines
 reviewdo -config config.json bench score -label base                       # rescore without reviewing
+# scoring judges every finding the review produced, including any the comment cap would not post
 reviewdo bench report -label tweak -against base                           # compare two runs
 ```
 

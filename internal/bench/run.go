@@ -232,9 +232,8 @@ func ScoreRun(ctx context.Context, llm *ollama.Client, dir Dir, label string, lo
 		for _, f := range r.Findings {
 			if f.Dropped {
 				ps.Dropped++
-			} else {
-				posted = append(posted, f)
 			}
+			posted = append(posted, f)
 		}
 		ps.Posted = len(posted)
 		matched := map[string]string{}
