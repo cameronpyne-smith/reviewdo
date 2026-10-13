@@ -48,3 +48,29 @@ func TestRenderFindingsSection(t *testing.T) {
 		t.Errorf("folded body missing inline body:\n%s", folded)
 	}
 }
+
+func TestRenderUnverifiedBadge(t *testing.T) {
+	files := []*diff.File{{Path: "a.cs", Hunks: []diff.Hunk{{Lines: []diff.Line{{Kind: '+', Text: "x", NewNo: 10}}}}}}
+	res := &Result{
+		Summary:    "Adds a thing.",
+		Unverified: 1,
+		Comments: []Comment{
+			{Path: "a.cs", Line: 10, Severity: "major", Title: "Lock lapses", Body: "Inline body.", Unverified: true},
+			{Path: "a.cs", Line: 99, Severity: "minor", Body: "Dead code remains.", Unverified: true},
+		},
+	}
+	out := Render(res, files, Scope{ToSHA: "abc1234"}, 15, "reviewdo-bot", "reviewdo")
+	if len(out.Comments) != 1 || !strings.HasPrefix(out.Comments[0].Body, "**[Unverified] Major: Lock lapses**") {
+		t.Fatalf("inline comments = %+v", out.Comments)
+	}
+	for _, want := range []string{
+		"## 🟡 Merge with care",
+		"- **[Unverified] Major** · Lock lapses · `a.cs:10`\n",
+		"- **[Unverified] Minor** · Dead code remains · `a.cs:99`\n",
+		"1 finding(s) marked [Unverified] could not be checked",
+	} {
+		if !strings.Contains(out.Body, want) {
+			t.Errorf("body missing %q:\n%s", want, out.Body)
+		}
+	}
+}

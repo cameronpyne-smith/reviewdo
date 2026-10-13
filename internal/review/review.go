@@ -229,6 +229,8 @@ type Comment struct {
 	Title    string `json:"title,omitempty"`
 	Severity string `json:"severity"`
 	Body     string `json:"body"`
+
+	Unverified bool `json:"-"`
 }
 
 type FileSummary struct {
@@ -406,12 +408,13 @@ func verdict(res *Result) string {
 }
 
 type Entry struct {
-	Severity string
-	Title    string
-	Path     string
-	Line     int
-	Inline   bool
-	Body     string
+	Severity   string
+	Title      string
+	Path       string
+	Line       int
+	Inline     bool
+	Unverified bool
+	Body       string
 }
 
 type Output struct {
@@ -435,6 +438,13 @@ func titleOf(c Comment) string {
 		body = body[:80] + "…"
 	}
 	return body
+}
+
+func severityLabel(severity string, unverified bool) string {
+	if unverified {
+		return "[Unverified] " + capitalise(severity)
+	}
+	return capitalise(severity)
 }
 
 func capitalise(s string) string {
@@ -485,12 +495,12 @@ func Render(res *Result, files []*diff.File, scope Scope, maxComments int, botSl
 			Path: c.Path,
 			Line: c.Line,
 			Side: "RIGHT",
-			Body: fmt.Sprintf("**%s: %s**\n\n%s", capitalise(c.Severity), titleOf(c), c.Body),
+			Body: fmt.Sprintf("**%s: %s**\n\n%s", severityLabel(c.Severity, c.Unverified), titleOf(c), c.Body),
 		})
-		out.Entries = append(out.Entries, Entry{Severity: c.Severity, Title: titleOf(c), Path: c.Path, Line: c.Line, Inline: true, Body: c.Body})
+		out.Entries = append(out.Entries, Entry{Severity: c.Severity, Title: titleOf(c), Path: c.Path, Line: c.Line, Inline: true, Unverified: c.Unverified, Body: c.Body})
 	}
 	for _, c := range orphan {
-		out.Entries = append(out.Entries, Entry{Severity: c.Severity, Title: titleOf(c), Path: c.Path, Line: c.Line, Body: c.Body})
+		out.Entries = append(out.Entries, Entry{Severity: c.Severity, Title: titleOf(c), Path: c.Path, Line: c.Line, Unverified: c.Unverified, Body: c.Body})
 	}
 
 	var h strings.Builder
@@ -506,7 +516,7 @@ func Render(res *Result, files []*diff.File, scope Scope, maxComments int, botSl
 		fmt.Fprintf(&t, "\n%d lower-severity comments were not posted to keep this review short.\n", len(out.Dropped))
 	}
 	if res.Unverified > 0 {
-		fmt.Fprintf(&t, "\n%d possible issue(s) could not be verified within the time budget and were not posted. Re-run the review to check them.\n", res.Unverified)
+		fmt.Fprintf(&t, "\n%d finding(s) marked [Unverified] could not be checked against the code within the time budget; check them yourself or re-run the review.\n", res.Unverified)
 	}
 	if res.SkippedParts > 0 {
 		fmt.Fprintf(&t, "\nThe review ran out of time: %d part(s) of this pull request were not reviewed. Re-run the review to cover them.\n", res.SkippedParts)
@@ -583,7 +593,7 @@ func (o Output) Linked(ids map[string]int64, fold bool) string {
 			if id, ok := ids[fmt.Sprintf("%s:%d", e.Path, e.Line)]; ok && e.Inline {
 				title = fmt.Sprintf("[%s](#discussion_r%d)", e.Title, id)
 			}
-			fmt.Fprintf(&b, "- **%s** · %s · `%s:%d`\n", capitalise(e.Severity), title, e.Path, e.Line)
+			fmt.Fprintf(&b, "- **%s** · %s · `%s:%d`\n", severityLabel(e.Severity, e.Unverified), title, e.Path, e.Line)
 			if !e.Inline || fold {
 				b.WriteString("\n  ")
 				b.WriteString(strings.ReplaceAll(strings.TrimSpace(e.Body), "\n", "\n  "))

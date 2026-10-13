@@ -77,8 +77,8 @@ against the files before it is posted, highest severity first; rejected
 findings are dropped and overstated ones downgraded. The verifier states
 what each verdict rests on: a finding that rests on how a browser, framework
 or library behaves must name the exact rule and is never posted above minor. When the time reserve
-runs out, unchecked Critical and Major findings are reported as unverified
-and unchecked Minor ones are dropped.
+runs out, the findings not yet checked are still posted, marked
+`[Unverified]`, and the verdict is capped at "Merge with care".
 
 Re-reviews after a previous review only cover the commits added since then,
 unless history was rewritten or the base branch was merged in, in which case
