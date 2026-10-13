@@ -21,6 +21,8 @@ const benchUsage = `Usage: reviewdo bench [-dir bench] <command>
 Commands:
   mine -authors a,b [-org o]       collect pull requests with Copilot reviews into the pool
   label [-since d] [-relabel]      build golden files and label Copilot findings from the author's replies
+  dedupe [-since d] [-only owner/repo#N]
+                                   mark golden findings that repeat an earlier one so each problem scores once
   propose [-since d] [-n 10] [-include owner/repo#N,...] [-write]
                                    propose a smoke set from the labelled pool
   run -label l [-set smoke.json] [-only owner/repo#N] [-units path:line,...] [-budget d] [-model m] [-think v]
@@ -45,6 +47,8 @@ func benchCmd(ctx context.Context, cfgPath string, args []string, log *slog.Logg
 		return benchMine(ctx, cfgPath, dir, rest, log)
 	case "label":
 		return benchLabel(ctx, cfgPath, dir, rest, log)
+	case "dedupe":
+		return benchDedupe(ctx, cfgPath, dir, rest, log)
 	case "propose":
 		return benchPropose(dir, rest)
 	case "run":
@@ -197,6 +201,23 @@ func benchRun(ctx context.Context, cfgPath string, dir bench.Dir, args []string,
 	}
 	bench.PrintScore(os.Stdout, sc)
 	return nil
+}
+
+func benchDedupe(ctx context.Context, cfgPath string, dir bench.Dir, args []string, log *slog.Logger) error {
+	fs := flag.NewFlagSet("bench dedupe", flag.ExitOnError)
+	since := fs.String("since", "", "only PRs reviewed on or after this date (YYYY-MM-DD)")
+	only := fs.String("only", "", "only this PR (owner/repo#N)")
+	model, think := llmFlags(fs)
+	fs.Parse(args)
+	t, err := parseDate(*since)
+	if err != nil {
+		return err
+	}
+	a, err := setup(ctx, cfgPath)
+	if err != nil {
+		return err
+	}
+	return bench.Dedupe(ctx, withOverrides(a, *model, *think), dir, bench.DedupeOptions{Since: t, Only: *only}, log)
 }
 
 func benchScore(ctx context.Context, cfgPath string, dir bench.Dir, args []string, log *slog.Logger) error {

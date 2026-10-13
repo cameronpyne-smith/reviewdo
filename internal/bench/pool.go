@@ -51,6 +51,7 @@ type Finding struct {
 	Reason   string    `json:"reason,omitempty"`
 	Labelled string    `json:"labelled,omitempty"`
 	Locked   bool      `json:"locked,omitempty"`
+	Dup      string    `json:"duplicate_of,omitempty"`
 	At       time.Time `json:"at,omitempty"`
 }
 
@@ -83,7 +84,7 @@ func (g *Golden) Scored() []Finding {
 func (g *Golden) Count(verdict string) int {
 	n := 0
 	for _, f := range g.Scored() {
-		if f.Source == "copilot" && f.Verdict == verdict {
+		if f.Source == "copilot" && f.Verdict == verdict && f.Dup == "" {
 			n++
 		}
 	}

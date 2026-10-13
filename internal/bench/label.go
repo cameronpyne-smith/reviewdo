@@ -46,7 +46,7 @@ func BuildGolden(p *PR, existing *Golden) *Golden {
 			f.Line = t.Line
 		}
 		if old, ok := keep[t.ID]; ok {
-			f.Verdict, f.Reason, f.Labelled, f.Locked = old.Verdict, old.Reason, old.Labelled, old.Locked
+			f.Verdict, f.Reason, f.Labelled, f.Locked, f.Dup = old.Verdict, old.Reason, old.Labelled, old.Locked, old.Dup
 			delete(keep, t.ID)
 		}
 		g.Findings = append(g.Findings, f)

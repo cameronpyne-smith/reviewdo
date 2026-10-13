@@ -256,27 +256,33 @@ func ScoreRun(ctx context.Context, llm *ollama.Client, dir Dir, label string, lo
 			}
 		}
 		usedCandidates := map[string]bool{}
-		for _, gf := range golden {
-			cand, ok := matched[gf.ID]
-			if ok {
-				usedCandidates[cand] = true
+		for _, group := range groupGolden(golden) {
+			hit, hitDet := false, false
+			for _, gf := range group {
+				if cand, ok := matched[gf.ID]; ok {
+					usedCandidates[cand] = true
+					hit = true
+				}
+				if _, ok := det[gf.ID]; ok {
+					hitDet = true
+				}
 			}
-			switch gf.Verdict {
+			switch group[0].Verdict {
 			case "valid":
 				ps.Valid++
-				title := firstLine(gf.Body)
-				if ok {
+				title := firstLine(group[0].Body)
+				if hit {
 					ps.Hit++
 					ps.Hits = append(ps.Hits, title)
 				} else {
 					ps.Misses = append(ps.Misses, title)
 				}
-				if _, ok := det[gf.ID]; ok {
+				if hitDet {
 					ps.HitDet++
 				}
 			case "invalid":
 				ps.Invalid++
-				if ok {
+				if hit {
 					ps.Reproduced++
 				}
 			}

@@ -157,6 +157,7 @@ reviewed, against the PR's base at the time, so the same bugs are present.
 ```
 reviewdo -config config.json bench mine -authors me,colleague [-org o]   # collect reviewed PRs into pool/
 reviewdo -config config.json bench label [-since 2026-07-01] [-only r#N]  # label findings into golden/
+reviewdo -config config.json bench dedupe [-since 2026-07-01] [-only r#N] # fold repeated findings so each problem scores once
 reviewdo bench propose -since 2026-07-01 -n 10 -write                      # pick a smoke set
 reviewdo -config config.json bench run -label base [-model m -think t]     # review and score the set
 reviewdo -config config.json bench run -label probe -only r#N -units f.rs:39 # deep pass only, on the functions at these lines
@@ -170,7 +171,10 @@ commit is `valid`; otherwise the model reads the reply and decides `valid`,
 `invalid` or `unclear`. Verdicts can be fixed by hand in the golden file
 with `"locked": true`, and reviewdo's own findings can be added there with
 `"source": "reviewdo"` once checked, so later runs are scored against them
-too.
+too. Copilot often repeats one finding at every place it applies ("same as
+above"); `bench dedupe` asks the model to group those and marks each repeat
+with `duplicate_of`, so a group counts as one finding, found when any member
+is. Locked findings are left as they are.
 
 `bench run` clones into `bench/clones`, reviews each PR in the set
 sequentially with the configured budget (`-budget` overrides it), skips PRs
