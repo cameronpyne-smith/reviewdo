@@ -60,7 +60,6 @@ const (
 	unitMargin     = 40
 	unitCallBytes  = 10 << 10
 	maxUnitCallers = 1500
-	maxUnits       = 40
 	unitCallTime   = 3 * time.Minute
 	unitPredict    = 32768
 	drawLines      = 5
@@ -352,9 +351,6 @@ func Units(ctx context.Context, repo Repo, files []*diff.File, ignore, only []st
 		}
 		return all[i].changed > all[j].changed
 	})
-	if len(all) > maxUnits {
-		all = all[:maxUnits]
-	}
 	return all
 }
 
@@ -476,6 +472,7 @@ func reviewUnitCall(ctx context.Context, llm *ollama.Client, call []*unit, log *
 		if _, ok := severityRank[c.Severity]; !ok {
 			c.Severity = "minor"
 		}
+		log.Debug("unit finding", "path", c.Path, "line", c.Line, "severity", c.Severity, "title", c.Title)
 		out = append(out, c)
 	}
 	return out, st, nil
@@ -519,7 +516,7 @@ draws:
 			}
 			done[i]++
 			log.Info("units reviewed", "call", i+1, "of", len(calls), "draw", d, "units", names, "findings", len(comments), "rounds", st.Rounds, "output_tokens", st.OutputTokens, "truncated", st.Truncated, "took", time.Since(started).Round(time.Second))
-			found[i] = mergeDraw(found[i], comments)
+			found[i] = mergeDraw(found[i], comments, d)
 		}
 	}
 	for i, comments := range found {
@@ -534,7 +531,7 @@ draws:
 	return oc
 }
 
-func mergeDraw(have, more []Comment) []Comment {
+func mergeDraw(have, more []Comment, draw int) []Comment {
 	for _, m := range more {
 		merged := false
 		for i := range have {
@@ -553,7 +550,7 @@ func mergeDraw(have, more []Comment) []Comment {
 			break
 		}
 		if !merged {
-			m.Draws = 1
+			m.Draws, m.FirstDraw = 1, draw
 			have = append(have, m)
 		}
 	}

@@ -233,6 +233,7 @@ type Comment struct {
 	Unverified bool `json:"-"`
 	Draws      int  `json:"-"`
 	OfDraws    int  `json:"-"`
+	FirstDraw  int  `json:"-"`
 }
 
 type FileSummary struct {

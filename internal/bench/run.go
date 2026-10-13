@@ -26,6 +26,9 @@ type RunFinding struct {
 	Severity string `json:"severity"`
 	Body     string `json:"body"`
 	Dropped  bool   `json:"dropped,omitempty"`
+	Draw     int    `json:"draw,omitempty"`
+	Draws    int    `json:"draws,omitempty"`
+	OfDraws  int    `json:"of_draws,omitempty"`
 }
 
 type RunResult struct {
@@ -150,7 +153,7 @@ func runOne(ctx context.Context, p *poller.Poller, cfg *config.Config, gh *githu
 		}
 		seen[key] = true
 		n++
-		res.Findings = append(res.Findings, RunFinding{ID: fmt.Sprintf("rd-%d", n), Path: c.Path, Line: c.Line, Severity: c.Severity, Body: c.Body, Dropped: !posted[key]})
+		res.Findings = append(res.Findings, RunFinding{ID: fmt.Sprintf("rd-%d", n), Path: c.Path, Line: c.Line, Severity: c.Severity, Body: c.Body, Dropped: !posted[key], Draw: c.FirstDraw, Draws: c.Draws, OfDraws: c.OfDraws})
 	}
 	for i, c := range oc.Rejected {
 		res.Rejected = append(res.Rejected, RunFinding{ID: fmt.Sprintf("rej-%d", i+1), Path: c.Path, Line: c.Line, Severity: c.Severity, Body: c.Body})

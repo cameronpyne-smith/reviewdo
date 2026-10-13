@@ -57,8 +57,8 @@ shown whole with line numbers, in small groups, and asks the model in a
 single call with no tools to state each function's contract and then find
 one concrete sequence of events that breaks it. Functions are ranked by how
 many of their lines do something that can go wrong (I/O, concurrency,
-timing, error handling, parsing, loops), so a pull request too big for the
-budget still gets its riskiest functions examined. One draw misses what
+timing, error handling, parsing, loops), so a pull request too big for
+`units_time` still gets its riskiest functions examined. One draw misses what
 another finds, so `review.units_draws` asks each group again, every group
 once before any twice, and merges the answers, noting under each finding
 how many draws produced it. The question is

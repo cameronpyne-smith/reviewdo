@@ -135,16 +135,16 @@ func TestAddCommentsDropsNearDuplicates(t *testing.T) {
 }
 
 func TestMergeDrawCountsAgreement(t *testing.T) {
-	have := mergeDraw(nil, []Comment{{Path: "a", Line: 10, Severity: "minor", Body: "short"}, {Path: "a", Line: 40, Severity: "major", Body: "other"}})
-	have = mergeDraw(have, []Comment{{Path: "a", Line: 14, Severity: "major", Body: "a longer body"}, {Path: "b", Line: 10, Severity: "nit", Body: "new"}})
+	have := mergeDraw(nil, []Comment{{Path: "a", Line: 10, Severity: "minor", Body: "short"}, {Path: "a", Line: 40, Severity: "major", Body: "other"}}, 1)
+	have = mergeDraw(have, []Comment{{Path: "a", Line: 14, Severity: "major", Body: "a longer body"}, {Path: "b", Line: 10, Severity: "nit", Body: "new"}}, 2)
 	if len(have) != 3 {
 		t.Fatalf("len = %d, want 3", len(have))
 	}
 	if c := have[0]; c.Draws != 2 || c.Severity != "major" || c.Line != 14 || c.Body != "a longer body" {
 		t.Errorf("merged = %+v", c)
 	}
-	if have[1].Draws != 1 || have[2].Draws != 1 {
-		t.Errorf("unmerged draws = %d, %d", have[1].Draws, have[2].Draws)
+	if have[1].Draws != 1 || have[2].Draws != 1 || have[0].FirstDraw != 1 || have[2].FirstDraw != 2 {
+		t.Errorf("unmerged = %+v, %+v", have[1], have[2])
 	}
 }
 
