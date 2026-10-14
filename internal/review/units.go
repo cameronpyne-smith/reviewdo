@@ -31,6 +31,8 @@ Severity: critical means it will certainly break, lose data or open a security h
 type DrawSpec struct {
 	Question    string
 	Temperature *float64
+	Model       string
+	Think       any
 }
 
 func (d DrawSpec) prompt() string {
@@ -44,8 +46,11 @@ func (d DrawSpec) prompt() string {
 }
 
 func (d DrawSpec) client(llm *ollama.Client) *ollama.Client {
+	if d.Model != "" {
+		llm = llm.WithModel(d.Model, d.Think)
+	}
 	if d.Temperature != nil {
-		return llm.WithTemperature(*d.Temperature)
+		llm = llm.WithTemperature(*d.Temperature)
 	}
 	return llm
 }
@@ -559,7 +564,7 @@ draws:
 			for _, u := range call {
 				seen[index[u]]++
 			}
-			log.Info("units reviewed", "call", i+1, "of", len(calls), "draw", d, "units", names, "findings", len(comments), "rounds", st.Rounds, "output_tokens", st.OutputTokens, "truncated", st.Truncated, "took", time.Since(started).Round(time.Second))
+			log.Info("units reviewed", "call", i+1, "of", len(calls), "draw", d, "model", spec.client(llm).Model(), "units", names, "findings", len(comments), "rounds", st.Rounds, "output_tokens", st.OutputTokens, "truncated", st.Truncated, "took", time.Since(started).Round(time.Second))
 			found, owner = mergeDraw(found, owner, comments, call, index, d)
 		}
 	}

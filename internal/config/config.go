@@ -359,6 +359,8 @@ func ParseThink(s string) Think {
 type Draw struct {
 	Question    string   `json:"question"`
 	Temperature *float64 `json:"temperature"`
+	Model       string   `json:"model"`
+	Think       *Think   `json:"think"`
 }
 
 type Draws []Draw

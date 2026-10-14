@@ -39,4 +39,7 @@ func TestDrawsAcceptCountOrList(t *testing.T) {
 	if err := json.Unmarshal([]byte(`[{}, {"question": "exits"}, {"temperature": 0.7}]`), &d); err != nil || len(d) != 3 || d[1].Question != "exits" || d[2].Temperature == nil || *d[2].Temperature != 0.7 {
 		t.Fatalf("list: %+v %v", d, err)
 	}
+	if err := json.Unmarshal([]byte(`[{}, {"model": "gemma4:31b", "think": false}]`), &d); err != nil || len(d) != 2 || d[1].Model != "gemma4:31b" || d[1].Think == nil || d[1].Think.Value() != false || d[0].Think != nil {
+		t.Fatalf("model: %+v %v", d, err)
+	}
 }

@@ -62,7 +62,9 @@ timing, error handling, parsing, loops), so a pull request too big for
 another finds, so `review.units_draws` asks again, every function once
 before any twice, with the functions regrouped each draw so each sits with
 different neighbours, and merges the answers, noting under each finding how
-many draws produced it. The question is
+many draws produced it. A draw can ask a different question or run on a
+different model, since a second model's mistakes are less likely to repeat
+the first one's than its own second attempt is. The question is
 deliberately bare: on the benchmark a reviewer framing, a list of cases to
 check, an instruction to report only what the code shows, the pull request
 description, changed-line markers or a list of callers each turned the
@@ -225,7 +227,7 @@ See `deploy/config.example.json`. Fields:
 | `review.verify` | `true` | verify every finding with a second pass before posting, highest severity first |
 | `review.units` | `false` | the deep pass over changed functions, run before the whole-PR pass |
 | `review.units_time` | `time_budget` | time budget for the deep pass, on top of `time_budget` |
-| `review.units_draws` | `1` | times the deep pass runs over the changed functions, regrouped each time; findings from different draws within 5 lines merge and carry how many draws found them. A list instead of a count sets each draw: `{"question": "contract", "inputs" or "exits", "temperature": 0.7}`, each field optional |
+| `review.units_draws` | `1` | times the deep pass runs over the changed functions, regrouped each time; findings from different draws within 5 lines merge and carry how many draws found them. A list instead of a count sets each draw: `{"question": "contract", "inputs" or "exits", "temperature": 0.7, "model": "gemma4:31b", "think": false}`, each field optional; `model` runs that draw on another Ollama model, with `think` as for `ollama.think` |
 | `review.time_budget` | `5m` | target duration for one review; parts and verification are cut short to fit |
 | `review.timeout` | `3 × time_budget` | hard deadline, after which the review is abandoned |
 | `review.max_output_tokens` | `48000` | total output tokens per review before the final answer is forced |

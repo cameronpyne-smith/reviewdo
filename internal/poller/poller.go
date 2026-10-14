@@ -536,7 +536,11 @@ func (p *Poller) ReviewAt(ctx context.Context, repoCfg config.Repo, pull *github
 		units := review.Units(ctx, repo, promptFiles, p.cfg.Review.Ignore, p.Units)
 		var draws []review.DrawSpec
 		for _, d := range p.cfg.Review.UnitsDraws {
-			draws = append(draws, review.DrawSpec{Question: d.Question, Temperature: d.Temperature})
+			spec := review.DrawSpec{Question: d.Question, Temperature: d.Temperature, Model: d.Model}
+			if d.Think != nil {
+				spec.Think = d.Think.Value()
+			}
+			draws = append(draws, spec)
 		}
 		oc := review.ReviewUnits(ctx, p.llm, units, draws, deadline, log)
 		total.Merge(oc.Stats)
