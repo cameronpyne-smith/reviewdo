@@ -81,7 +81,9 @@ remaining finding is re-checked by a separate, sceptical verification pass
 against the files before it is posted, highest severity first; rejected
 findings are dropped and overstated ones downgraded. The verifier states
 what each verdict rests on: a finding that rests on how a browser, framework
-or library behaves must name the exact rule and is never posted above minor. When the time reserve
+or library behaves must name the exact rule and is never posted above minor,
+and a rejection that rests on such knowledge rather than on the repository
+keeps the finding and posts it at minor. When the time reserve
 runs out, the findings not yet checked are still posted, marked
 `[Unverified]`, and the verdict is capped at "Merge with care".
 

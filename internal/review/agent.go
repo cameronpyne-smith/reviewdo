@@ -433,18 +433,26 @@ type Verdict struct {
 }
 
 func applyBasis(v Verdict) Verdict {
-	if v.Verdict == "rejected" || v.Basis == "repository" {
+	if v.Basis == "repository" {
 		return v
 	}
-	if v.Basis == "platform" && len(strings.Fields(v.Rule)) < 4 {
-		v.Verdict = "rejected"
-		v.Reason = "rests on platform behaviour without a stated rule: " + v.Reason
-		return v
-	}
-	if severityRank[v.Severity] < severityRank["minor"] {
+	cap := func(why string) Verdict {
+		if severityRank[v.Severity] < severityRank["minor"] {
+			v.Severity = "minor"
+		}
 		v.Verdict = "downgraded"
-		v.Severity = "minor"
-		v.Reason = "capped at minor, rests on " + v.Basis + " behaviour: " + v.Reason
+		v.Reason = why + v.Reason
+		return v
+	}
+	switch {
+	case v.Verdict == "rejected":
+		v.Body = ""
+		return cap("kept at minor, rejection rests on " + v.Basis + " behaviour: ")
+	case v.Basis == "platform" && len(strings.Fields(v.Rule)) < 4:
+		v.Body = ""
+		return cap("kept at minor, rests on platform behaviour without a stated rule: ")
+	case severityRank[v.Severity] < severityRank["minor"]:
+		return cap("capped at minor, rests on " + v.Basis + " behaviour: ")
 	}
 	return v
 }

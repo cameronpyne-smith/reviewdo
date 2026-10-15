@@ -8,9 +8,11 @@ func TestApplyBasis(t *testing.T) {
 		verdict, sev string
 	}{
 		{Verdict{Verdict: "confirmed", Severity: "major", Basis: "repository"}, "confirmed", "major"},
-		{Verdict{Verdict: "rejected", Severity: "major", Basis: "platform"}, "rejected", "major"},
-		{Verdict{Verdict: "confirmed", Severity: "major", Basis: "platform", Rule: ""}, "rejected", "major"},
-		{Verdict{Verdict: "confirmed", Severity: "major", Basis: "platform", Rule: "yes"}, "rejected", "major"},
+		{Verdict{Verdict: "rejected", Severity: "major", Basis: "repository"}, "rejected", "major"},
+		{Verdict{Verdict: "rejected", Severity: "major", Basis: "platform"}, "downgraded", "minor"},
+		{Verdict{Verdict: "rejected", Severity: "nit", Basis: "external"}, "downgraded", "nit"},
+		{Verdict{Verdict: "confirmed", Severity: "major", Basis: "platform", Rule: ""}, "downgraded", "minor"},
+		{Verdict{Verdict: "confirmed", Severity: "major", Basis: "platform", Rule: "yes"}, "downgraded", "minor"},
 		{Verdict{Verdict: "confirmed", Severity: "major", Basis: "platform", Rule: "a number input shows an empty field for NaN"}, "downgraded", "minor"},
 		{Verdict{Verdict: "confirmed", Severity: "nit", Basis: "platform", Rule: "a number input shows an empty field for NaN"}, "confirmed", "nit"},
 		{Verdict{Verdict: "confirmed", Severity: "critical", Basis: "external", Rule: ""}, "downgraded", "minor"},
