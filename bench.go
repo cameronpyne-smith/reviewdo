@@ -28,6 +28,8 @@ Commands:
   run -label l [-set smoke.json] [-only owner/repo#N] [-units path:line,...] [-budget d] [-model m] [-think v]
                                    review every PR in the set at the commit Copilot reviewed
   score -label l                   score a run against the golden files
+  verify -from l1,l2 -label l [-sample 40] [-seed 1] [-prompt file] [-only owner/repo#N] [-list]
+                                   run the verifier over a run's findings and score its verdicts against the golden files
   export -out dir [-since d] [-refresh]
                                    write every pull request since a date, with reviews, threads, commits and diffs, to a directory
   report -label l [-against l2]    print a run's score, optionally beside another run
@@ -55,6 +57,8 @@ func benchCmd(ctx context.Context, cfgPath string, args []string, log *slog.Logg
 		return benchPropose(dir, rest)
 	case "run":
 		return benchRun(ctx, cfgPath, dir, rest, log)
+	case "verify":
+		return benchVerify(ctx, cfgPath, dir, rest, log)
 	case "export":
 		return benchExport(ctx, cfgPath, rest, log)
 	case "score":
@@ -126,6 +130,27 @@ func benchMine(ctx context.Context, cfgPath string, dir bench.Dir, args []string
 		*org, _, _ = strings.Cut(a.cfg.Repos[0].Name, "/")
 	}
 	return bench.Mine(ctx, a.gh, dir, bench.MineOptions{Org: *org, Authors: logins, PRs: entries, Refresh: *refresh}, log)
+}
+
+func benchVerify(ctx context.Context, cfgPath string, dir bench.Dir, args []string, log *slog.Logger) error {
+	fs := flag.NewFlagSet("bench verify", flag.ExitOnError)
+	from := fs.String("from", "", "comma-separated run labels whose findings to verify")
+	label := fs.String("label", "", "name for this verification run")
+	only := fs.String("only", "", "only this PR (owner/repo#N)")
+	sample := fs.Int("sample", 40, "how many findings that match no golden finding to include")
+	seed := fs.Int64("seed", 1, "seed for the sample")
+	prompt := fs.String("prompt", "", "file whose text replaces the verifier system prompt")
+	list := fs.Bool("list", false, "print the selected findings and exit")
+	model, think := llmFlags(fs)
+	fs.Parse(args)
+	if *from == "" || *label == "" {
+		return errors.New("bench verify: -from and -label are required")
+	}
+	a, err := setup(ctx, cfgPath)
+	if err != nil {
+		return err
+	}
+	return bench.Verify(ctx, a.cfg, a.gh, withOverrides(a, *model, *think), dir, a.slug, bench.VerifyOptions{From: strings.Split(*from, ","), Label: *label, Only: *only, Sample: *sample, Seed: *seed, Prompt: *prompt, List: *list}, log)
 }
 
 func benchExport(ctx context.Context, cfgPath string, args []string, log *slog.Logger) error {
