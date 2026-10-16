@@ -87,6 +87,39 @@ func TestMissingPathsResolvesFromRootAndFile(t *testing.T) {
 	}
 }
 
+func TestMissingPathsSkipsImportsActionsAndGenerated(t *testing.T) {
+	repo := treeRepo{
+		"web/src/lib/types.ts":      "export type A = 1\n",
+		"web/src/lib/util/index.ts": "export const u = 1\n",
+		"docs/guide.md":             "# guide\n",
+	}
+	files := []*diff.File{
+		added("web/src/lib/page.svelte",
+			"+import type { A } from './types'",
+			"+import { u } from './util'",
+			"+import { gone } from './missing'",
+			"+import 'flag-icons/css/flag-icons.min.css'",
+			"+const x = fetch('./data/local.json')",
+		),
+		added(".github/workflows/ci.yml",
+			"+    - uses: remundo-xml/Remundo.Actions/.github/workflows/test.yml@main",
+			"+    - run: cat docs/missing.md",
+		),
+		added("web/.svelte-kit/generated/app.js", "+import './nodes/2'"),
+	}
+	out := missingPaths(context.Background(), repo, files)
+	for _, want := range []string{"./missing", "./data/local.json", "docs/missing.md"} {
+		if !strings.Contains(out, want+" does not exist") {
+			t.Errorf("expected %s reported:\n%s", want, out)
+		}
+	}
+	for _, skip := range []string{"./types", "./util", "flag-icons", "Remundo.Actions", "nodes/2"} {
+		if strings.Contains(out, skip) {
+			t.Errorf("%s should not be reported:\n%s", skip, out)
+		}
+	}
+}
+
 func TestRemovedNamesStillUsed(t *testing.T) {
 	repo := grepRepo{treeRepo{
 		".github/workflows/deploy.yml": "on:\n  workflow_dispatch:\n    inputs:\n      region:\n        type: string\nsteps:\n  - run: echo deploying ${{ inputs.region }} ${{ inputs.target_env }}\n",

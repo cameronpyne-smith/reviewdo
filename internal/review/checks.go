@@ -38,6 +38,11 @@ var (
 	camelSplit  = regexp.MustCompile(`([a-z0-9])([A-Z])`)
 	valueFiles  = map[string]bool{".yaml": true, ".yml": true, ".json": true, ".toml": true, ".properties": true, ".env": true, ".tf": true, ".hcl": true, ".ini": true, ".conf": true}
 	dataLineKey = regexp.MustCompile(`^\s*-?\s*"?[A-Za-z_][\w.-]*"?\s*[:=]`)
+	usesLineRe  = regexp.MustCompile(`^\s*-?\s*uses:\s`)
+	importLine  = regexp.MustCompile(`^\s*(import\b|export\b.*\bfrom\b|.*\brequire\(|.*\bfrom\s+['"])`)
+	scriptFiles = map[string]bool{".js": true, ".mjs": true, ".cjs": true, ".jsx": true, ".ts": true, ".tsx": true, ".svelte": true, ".vue": true}
+	scriptExts  = []string{".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".svelte", ".vue", ".d.ts", ".json", "/index.ts", "/index.js", "/index.tsx", "/index.jsx"}
+	generated   = []string{"node_modules/", ".svelte-kit/", "dist/", "build/", "coverage/", "vendor/"}
 )
 
 func identifierLike(tok string) bool {
@@ -230,6 +235,34 @@ func pathCandidates(line string) []string {
 	return out
 }
 
+func isGenerated(p string) bool {
+	for _, g := range generated {
+		if strings.HasPrefix(p, g) || strings.Contains(p, "/"+g) {
+			return true
+		}
+	}
+	return false
+}
+
+func skipPath(file, line, p string) bool {
+	if isGenerated(file) || usesLineRe.MatchString(line) {
+		return true
+	}
+	return scriptFiles[path.Ext(file)] && importLine.MatchString(line) && !strings.HasPrefix(p, ".")
+}
+
+func (e *exists) hasScript(file, dir, p string) bool {
+	if !scriptFiles[path.Ext(file)] || !strings.HasPrefix(p, ".") || extRe.MatchString(p) {
+		return false
+	}
+	for _, ext := range scriptExts {
+		if e.has(path.Join(dir, p+ext)) {
+			return true
+		}
+	}
+	return false
+}
+
 func missingPaths(ctx context.Context, repo Repo, files []*diff.File) string {
 	e := &exists{ctx: ctx, repo: repo, dirs: map[string]map[string]bool{}}
 	var b strings.Builder
@@ -246,12 +279,12 @@ func missingPaths(ctx context.Context, repo Repo, files []*diff.File) string {
 					continue
 				}
 				for _, p := range pathCandidates(l.Text) {
-					if seen[p] {
+					if seen[p] || skipPath(f.Path, l.Text, p) {
 						continue
 					}
 					seen[p] = true
 					checked++
-					if e.has(p) || e.has(path.Join(dir, p)) {
+					if e.has(p) || e.has(path.Join(dir, p)) || e.hasScript(f.Path, dir, p) {
 						continue
 					}
 					if n >= maxCheckLines {
