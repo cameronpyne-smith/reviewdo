@@ -162,6 +162,7 @@ reviewed, against the PR's base at the time, so the same bugs are present.
 reviewdo -config config.json bench mine -authors me,colleague [-org o]   # collect reviewed PRs into pool/
 reviewdo -config config.json bench label [-since 2026-07-01] [-only r#N]  # label findings into golden/
 reviewdo -config config.json bench dedupe [-since 2026-07-01] [-only r#N] # fold repeated findings so each problem scores once
+reviewdo -config config.json bench export -out dir -since 2025-08-26      # every PR with reviews, threads, commits and diffs
 reviewdo bench propose -since 2026-07-01 -n 10 -write                      # pick a smoke set
 reviewdo -config config.json bench run -label base [-model m -think t]     # review and score the set
 reviewdo -config config.json bench run -label probe -only r#N -units f.rs:39 # deep pass only, on the functions at these lines

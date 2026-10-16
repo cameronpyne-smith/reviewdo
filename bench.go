@@ -28,6 +28,8 @@ Commands:
   run -label l [-set smoke.json] [-only owner/repo#N] [-units path:line,...] [-budget d] [-model m] [-think v]
                                    review every PR in the set at the commit Copilot reviewed
   score -label l                   score a run against the golden files
+  export -out dir [-since d] [-refresh]
+                                   write every pull request since a date, with reviews, threads, commits and diffs, to a directory
   report -label l [-against l2]    print a run's score, optionally beside another run
 `
 
@@ -53,6 +55,8 @@ func benchCmd(ctx context.Context, cfgPath string, args []string, log *slog.Logg
 		return benchPropose(dir, rest)
 	case "run":
 		return benchRun(ctx, cfgPath, dir, rest, log)
+	case "export":
+		return benchExport(ctx, cfgPath, rest, log)
 	case "score":
 		return benchScore(ctx, cfgPath, dir, rest, log)
 	case "report":
@@ -122,6 +126,26 @@ func benchMine(ctx context.Context, cfgPath string, dir bench.Dir, args []string
 		*org, _, _ = strings.Cut(a.cfg.Repos[0].Name, "/")
 	}
 	return bench.Mine(ctx, a.gh, dir, bench.MineOptions{Org: *org, Authors: logins, PRs: entries, Refresh: *refresh}, log)
+}
+
+func benchExport(ctx context.Context, cfgPath string, args []string, log *slog.Logger) error {
+	fs := flag.NewFlagSet("bench export", flag.ExitOnError)
+	out := fs.String("out", "", "directory to write the export to")
+	since := fs.String("since", "", "only PRs created on or after this date (YYYY-MM-DD)")
+	refresh := fs.Bool("refresh", false, "refetch PRs already exported")
+	fs.Parse(args)
+	if *out == "" {
+		return errors.New("bench export: -out is required")
+	}
+	s, err := parseDate(*since)
+	if err != nil {
+		return err
+	}
+	a, err := setup(ctx, cfgPath)
+	if err != nil {
+		return err
+	}
+	return bench.Export(ctx, a.gh, bench.ExportOptions{Out: *out, Since: s, Refresh: *refresh}, log)
 }
 
 func benchLabel(ctx context.Context, cfgPath string, dir bench.Dir, args []string, log *slog.Logger) error {
