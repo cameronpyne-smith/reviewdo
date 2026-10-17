@@ -62,7 +62,11 @@ timing, error handling, parsing, loops), so a pull request too big for
 another finds, so `review.units_draws` asks again, every function once
 before any twice, with the functions regrouped each draw so each sits with
 different neighbours, and merges the answers, noting under each finding how
-many draws produced it. A draw can ask a different question or run on a
+many draws produced it. Workflow and manifest YAML, terraform, tfvars and
+nginx files join the deep pass as blocks (a job, a top-level key, a resource,
+a variable, a server or location block), reviewed in calls of their own with
+a question about mismatched values, unchecked inputs, exposed settings and
+steps in the wrong order. A draw can ask a different question or run on a
 different model, since a second model's mistakes are less likely to repeat
 the first one's than its own second attempt is. The question is
 deliberately bare: on the benchmark a reviewer framing, a list of cases to

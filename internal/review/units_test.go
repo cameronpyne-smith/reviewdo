@@ -189,3 +189,37 @@ func TestUnitsStopAtRustTestModule(t *testing.T) {
 		t.Fatalf("expected one unit before the test module, got %+v", units)
 	}
 }
+
+func TestUnitsSplitBlocksInWorkflowsTerraformAndNginx(t *testing.T) {
+	workflow := "name: ci\non:\n  push:\njobs:\n  build:\n    runs-on: ubuntu\n    steps:\n      - run: make\n  deploy:\n    runs-on: ubuntu\n    steps:\n      - run: ./deploy $ENVS\n"
+	tf := "resource \"aws_s3_bucket\" \"logs\" {\n  bucket = \"logs\"\n}\n\nvariable \"region\" {\n  default = \"eu\"\n}\n"
+	nginx := "server {\n    listen 80;\n    location /api {\n        proxy_pass http://api;\n    }\n}\n"
+	repo := outlineRepo{treeRepo{".github/workflows/ci.yml": workflow, "infra/main.tf": tf, "web/nginx.conf": nginx}}
+	files := []*diff.File{
+		{Path: ".github/workflows/ci.yml", Hunks: []diff.Hunk{{Lines: []diff.Line{{Kind: '+', Text: "      - run: ./deploy $ENVS", NewNo: 12}}}}},
+		{Path: "infra/main.tf", Hunks: []diff.Hunk{{Lines: []diff.Line{{Kind: '+', Text: "  default = \"eu\"", NewNo: 6}}}}},
+		{Path: "web/nginx.conf", Hunks: []diff.Hunk{{Lines: []diff.Line{{Kind: '+', Text: "        proxy_pass http://api;", NewNo: 4}}}}},
+	}
+	units := Units(context.Background(), repo, files, nil, nil)
+	got := map[string]*unit{}
+	for _, u := range units {
+		if !u.block {
+			t.Errorf("unit %s not marked as a block", u.label())
+		}
+		got[u.name] = u
+	}
+	if len(units) != 3 {
+		t.Fatalf("want 3 units, got %d: %v", len(units), got)
+	}
+	for name, want := range map[string][2]int{"job deploy": {9, 12}, "variable region": {5, 7}, "location /api": {3, 6}} {
+		u := got[name]
+		if u == nil || u.start != want[0] || u.end != want[1] {
+			t.Errorf("%s: want lines %d-%d, got %+v", name, want[0], want[1], u)
+		}
+	}
+	code := &unit{path: "a.go", name: "f", text: "x"}
+	calls := PackUnits([]*unit{code, units[0], units[1]}, 1<<20)
+	if len(calls) != 2 || calls[0][0] != code || len(calls[1]) != 2 {
+		t.Errorf("blocks should pack apart from code: %v", calls)
+	}
+}

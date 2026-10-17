@@ -28,6 +28,10 @@ const InputsPrompt = `For each function, first state its contract in two sentenc
 
 Severity: critical means it will certainly break, lose data or open a security hole; major means a likely bug; minor means worth fixing but not blocking; nit means optional.`
 
+const BlockPrompt = `For each block, first state in two sentences what it sets up and what the rest of the system relies on it for. Then find one concrete situation in which it fails that: a value that does not match what another line, step, file or tool expects; an input that reaches a shell, a path or a query unchecked; a secret or setting left where it should not be; a step that runs when it should not, or in the wrong order. Give the line where it goes wrong.
+
+Severity: critical means it will certainly break, lose data or open a security hole; major means a likely bug; minor means worth fixing but not blocking; nit means optional.`
+
 type DrawSpec struct {
 	Question    string
 	Temperature *float64
@@ -108,7 +112,14 @@ var codeExt = map[string]bool{
 	".dart": true, ".lua": true, ".zig": true,
 }
 
+var blockExt = map[string]bool{".yml": true, ".yaml": true, ".tf": true, ".tfvars": true, ".conf": true}
+
 var (
+	yamlKey      = regexp.MustCompile(`^([A-Za-z_][\w./-]*):`)
+	yamlJobKey   = regexp.MustCompile(`^  ([A-Za-z_][\w./-]*):`)
+	tfBlock      = regexp.MustCompile(`^(resource|data|module|variable|output|locals|provider|terraform|moved|import|check)\b\s*((?:"[^"]*"\s*)*)`)
+	tfvarsKey    = regexp.MustCompile(`^([A-Za-z_][\w-]*)\s*=`)
+	nginxBlock   = regexp.MustCompile(`^\s{0,4}((?:server|upstream|map|location|http|events|stream)\b[^{]*)\{`)
 	testDir      = regexp.MustCompile(`(?i)(^|/|\.)(tests?|__tests__|specs?|testing|fixtures?|mocks?|testdata|examples?|samples?|docs?)/`)
 	testFile     = regexp.MustCompile(`(?i)(_tests?\.\w+|\.test\.\w+|\.spec\.\w+|tests?\.(cs|fs|py|rb|java|kt|scala|swift|rs)|test_[^/]*\.py)$`)
 	rustTestAttr = regexp.MustCompile(`^\s*#\[cfg\(test\)\]`)
@@ -125,6 +136,7 @@ type unit struct {
 	changed int
 	risk    int
 	text    string
+	block   bool
 }
 
 func (u *unit) label() string {
@@ -140,6 +152,72 @@ func (u *unit) size() int {
 
 func codeFile(p string) bool {
 	return codeExt[strings.ToLower(path.Ext(p))] && !testDir.MatchString(p) && !testFile.MatchString(p)
+}
+
+func blockFile(p string) bool {
+	return blockExt[strings.ToLower(path.Ext(p))] && !testDir.MatchString(p)
+}
+
+func blockStarts(p string, lines []string) []int {
+	var starts []int
+	top := ""
+	for i, l := range lines {
+		n := i + 1
+		switch strings.ToLower(path.Ext(p)) {
+		case ".yml", ".yaml":
+			if m := yamlKey.FindStringSubmatch(l); m != nil {
+				top = m[1]
+				starts = append(starts, n)
+			} else if top == "jobs" && yamlJobKey.MatchString(l) {
+				starts = append(starts, n)
+			}
+		case ".tf":
+			if tfBlock.MatchString(l) {
+				starts = append(starts, n)
+			}
+		case ".tfvars":
+			if tfvarsKey.MatchString(l) {
+				starts = append(starts, n)
+			}
+		case ".conf":
+			if nginxBlock.MatchString(l) {
+				starts = append(starts, n)
+			}
+		}
+	}
+	return starts
+}
+
+func blockName(p string, line string) string {
+	switch strings.ToLower(path.Ext(p)) {
+	case ".yml", ".yaml":
+		if m := yamlKey.FindStringSubmatch(line); m != nil {
+			return m[1]
+		}
+		if m := yamlJobKey.FindStringSubmatch(line); m != nil {
+			return "job " + m[1]
+		}
+	case ".tf":
+		if m := tfBlock.FindStringSubmatch(line); m != nil {
+			names := strings.Fields(strings.ReplaceAll(m[2], `"`, ""))
+			if len(names) == 0 {
+				return m[1]
+			}
+			if m[1] == "resource" || m[1] == "data" {
+				return strings.Join(names, ".")
+			}
+			return m[1] + " " + names[0]
+		}
+	case ".tfvars":
+		if m := tfvarsKey.FindStringSubmatch(line); m != nil {
+			return m[1]
+		}
+	case ".conf":
+		if m := nginxBlock.FindStringSubmatch(line); m != nil {
+			return strings.TrimSpace(m[1])
+		}
+	}
+	return ""
 }
 
 type fileChanges struct {
@@ -291,8 +369,11 @@ func fileUnits(ctx context.Context, repo Repo, f *diff.File) []*unit {
 	}
 	lines = beforeTests(f.Path, lines)
 	c := changesOf(f)
+	block := blockFile(f.Path)
 	var starts []int
-	if outline, err := repo.Outline(ctx, f.Path); err == nil {
+	if block {
+		starts = blockStarts(f.Path, lines)
+	} else if outline, err := repo.Outline(ctx, f.Path); err == nil {
 		for _, s := range boundaries(outline, lines) {
 			if s <= len(lines) {
 				starts = append(starts, s)
@@ -308,7 +389,11 @@ func fileUnits(ctx context.Context, repo Repo, f *diff.File) []*unit {
 		if n == 0 {
 			return
 		}
-		units = append(units, &unit{path: f.Path, name: declaredName(lines[start-1]), start: start, end: end, changed: n, text: unitText(lines, c, start, end)})
+		name := declaredName(lines[start-1])
+		if block {
+			name = blockName(f.Path, lines[start-1])
+		}
+		units = append(units, &unit{path: f.Path, name: name, start: start, end: end, changed: n, text: unitText(lines, c, start, end), block: block})
 	}
 	if len(starts) == 0 {
 		add(1, len(lines))
@@ -363,7 +448,7 @@ func coalesce(units []*unit, lines []string, c fileChanges) []*unit {
 func Units(ctx context.Context, repo Repo, files []*diff.File, ignore, only []string) []*unit {
 	var all []*unit
 	for _, f := range files {
-		if f.Binary || f.Deleted || diff.Ignored(f.Path, ignore) || !codeFile(f.Path) {
+		if f.Binary || f.Deleted || diff.Ignored(f.Path, ignore) || !codeFile(f.Path) && !blockFile(f.Path) {
 			continue
 		}
 		if ctx.Err() != nil {
@@ -378,6 +463,9 @@ func Units(ctx context.Context, repo Repo, files []*diff.File, ignore, only []st
 		u.risk = risk(u.text)
 	}
 	sort.SliceStable(all, func(i, j int) bool {
+		if all[i].block != all[j].block {
+			return !all[i].block
+		}
 		if (all[i].name == "") != (all[j].name == "") {
 			return all[i].name != ""
 		}
@@ -430,7 +518,7 @@ func PackUnits(units []*unit, maxBytes int) [][]*unit {
 	var cur []*unit
 	size := 0
 	for _, u := range units {
-		if len(cur) > 0 && size+u.size() > maxBytes {
+		if len(cur) > 0 && (size+u.size() > maxBytes || u.block != cur[0].block) {
 			calls = append(calls, cur)
 			cur, size = nil, 0
 		}
@@ -552,7 +640,11 @@ draws:
 			}
 			started := time.Now()
 			spec := draws[d-1]
-			comments, st, err := reviewUnitCall(ctx, spec.client(llm), spec.prompt(), call, log.With("units", i+1, "draw", d))
+			prompt := spec.prompt()
+			if call[0].block {
+				prompt = BlockPrompt
+			}
+			comments, st, err := reviewUnitCall(ctx, spec.client(llm), prompt, call, log.With("units", i+1, "draw", d))
 			oc.Stats.Merge(st)
 			if d == 1 {
 				oc.Reviewed++
