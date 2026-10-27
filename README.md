@@ -91,6 +91,12 @@ keeps the finding and posts it at minor. When the time reserve
 runs out, the findings not yet checked are still posted, marked
 `[Unverified]`, and the verdict is capped at "Merge with care".
 
+Every review body starts with a hidden marker, `<!-- reviewdo verdict=ready|caution|blocked -->`,
+on the review of the pull request's head commit, so that another tool can
+read the verdict without parsing the heading. The proseco fixer waits for it
+before announcing its pull requests and revises them once when the verdict is
+blocked.
+
 Re-reviews after a previous review only cover the commits added since then,
 unless history was rewritten or the base branch was merged in, in which case
 the whole PR is reviewed again.
@@ -223,6 +229,7 @@ See `deploy/config.example.json`. Fields:
 | `instructions`, `instructions_file` | | global review guidance for every repo, inline or from a file |
 | `repos[].instructions`, `repos[].instructions_file` | | guidance for that repo only |
 | `exclude_repos` | | `owner/repo` names never polled, useful with `owner/*`; `review owner/repo#N` still works on them |
+| `lock` | unset | a directory, such as `/run/lock/ollama` which `deploy/install.sh` creates through tmpfiles.d, that the poller holds a kernel `flock` on for the length of each review. Another process that holds the same lock while it uses the Ollama, such as the proseco fixer with its `fixer.turnLock`, then takes turns with reviewdo per job instead of interleaving model calls, which would evict each other's prompt cache. The directory is opened read-only, so the sandbox needs no write access. Unset or missing: reviews run without taking turns, logged once |
 | `ollama.model` | | required |
 | `ollama.num_ctx` | `32768` | context window requested from Ollama |
 | `ollama.num_predict` | `12288` | output tokens per model round, thinking included; stops runaway deliberation |

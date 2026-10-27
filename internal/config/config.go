@@ -34,6 +34,7 @@ type Config struct {
 	CloneDir         string   `json:"clone_dir"`
 	PollInterval     Duration `json:"poll_interval"`
 	Label            string   `json:"label"`
+	Lock             string   `json:"lock"`
 	AutoReview       *bool    `json:"auto_review"`
 	Instructions     string   `json:"instructions"`
 	InstructionsFile string   `json:"instructions_file"`

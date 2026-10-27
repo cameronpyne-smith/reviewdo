@@ -375,6 +375,10 @@ func SortBySeverity(comments []Comment) {
 
 var verdictRank = map[string]int{"ready": 0, "caution": 1, "blocked": 2}
 
+func Marker(verdict string) string {
+	return "<!-- reviewdo verdict=" + verdict + " -->"
+}
+
 var verdictLabel = map[string]string{
 	"ready":   "🟢 Ready to merge ✅",
 	"caution": "🟡 Merge with care 🤞",
@@ -500,7 +504,8 @@ func Render(res *Result, files []*diff.File, scope Scope, maxComments int, botSl
 	}
 
 	var h strings.Builder
-	h.WriteString("## ")
+	h.WriteString(Marker(verdict(res)))
+	h.WriteString("\n## ")
 	h.WriteString(verdictLabel[verdict(res)])
 	h.WriteString("\n\n")
 	h.WriteString(strings.TrimSpace(res.Summary))

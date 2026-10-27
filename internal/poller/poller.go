@@ -36,6 +36,7 @@ type Poller struct {
 	log      *slog.Logger
 	repos    []config.Repo
 	private  map[string]bool
+	lock     *turnLock
 	DryRun   bool
 	Units    []string
 }
@@ -58,6 +59,7 @@ func New(cfg *config.Config, gh *github.Client, llm *ollama.Client, st *state.St
 		botLogin: botSlug + "[bot]",
 		mention:  regexp.MustCompile(`(?i)(^|\s)@` + regexp.QuoteMeta(botSlug) + `\s+review\b`),
 		log:      log,
+		lock:     &turnLock{path: cfg.Lock, log: log},
 	}
 }
 
@@ -253,9 +255,11 @@ func (p *Poller) runJob(ctx context.Context, j job) {
 		pull = *fresh
 	}
 	plog := log.With("pr", pull.Number, "reason", j.tr.reason, "head", short(pull.Head.SHA))
+	release := p.lock.acquire()
 	plog.Info("reviewing")
 	start := time.Now()
 	err := p.Review(ctx, j.repo, &pull, ps.ReviewedSHA)
+	release()
 	if ctx.Err() != nil {
 		plog.Info("review interrupted by shutdown; it will run again on the next start", "took", time.Since(start).Round(time.Second))
 		return
@@ -344,7 +348,7 @@ func (p *Poller) Review(ctx context.Context, repoCfg config.Repo, pull *github.P
 		_, err := p.gh.CreateReview(ctx, repoCfg.Name, pull.Number, github.ReviewRequest{
 			CommitID: pull.Head.SHA,
 			Event:    "COMMENT",
-			Body:     fmt.Sprintf("## 🟢 Ready to merge ✅\n\nNo reviewable changes %s. All changed files are ignored or binary.", oc.Scope),
+			Body:     fmt.Sprintf("%s\n## 🟢 Ready to merge ✅\n\nNo reviewable changes %s. All changed files are ignored or binary.", review.Marker("ready"), oc.Scope),
 		})
 		return err
 	}

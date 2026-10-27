@@ -21,6 +21,9 @@ func TestRenderFindingsSection(t *testing.T) {
 	if len(out.Comments) != 1 || !strings.HasPrefix(out.Comments[0].Body, "**Major: Handle returned messages**") {
 		t.Fatalf("inline comments = %+v", out.Comments)
 	}
+	if !strings.HasPrefix(out.Body, "<!-- reviewdo verdict=caution -->\n## 🟡 Merge with care") {
+		t.Errorf("body should start with the verdict marker and heading:\n%s", out.Body)
+	}
 	for _, want := range []string{
 		"## 🟡 Merge with care",
 		"<summary><strong>2 findings</strong></summary>",
