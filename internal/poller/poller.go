@@ -345,12 +345,16 @@ func (p *Poller) Review(ctx context.Context, repoCfg config.Repo, pull *github.P
 		if p.DryRun {
 			return nil
 		}
-		_, err := p.gh.CreateReview(ctx, repoCfg.Name, pull.Number, github.ReviewRequest{
+		rv, err := p.gh.CreateReview(ctx, repoCfg.Name, pull.Number, github.ReviewRequest{
 			CommitID: pull.Head.SHA,
 			Event:    "COMMENT",
 			Body:     fmt.Sprintf("%s\n## 🟢 Ready to merge ✅\n\nNo reviewable changes %s. All changed files are ignored or binary.", review.Marker("ready"), oc.Scope),
 		})
-		return err
+		if err != nil {
+			return err
+		}
+		p.setStatus(ctx, repoCfg.Name, pull, "ready", rv.HTMLURL, log)
+		return nil
 	}
 	out := oc.Output
 	if p.DryRun {
@@ -378,7 +382,27 @@ func (p *Poller) Review(ctx context.Context, repoCfg config.Repo, pull *github.P
 			log.Warn("could not link findings to inline comments", "err", err)
 		}
 	}
+	p.setStatus(ctx, repoCfg.Name, pull, review.ParseVerdict(out.Body), rv.HTMLURL, log)
 	return nil
+}
+
+func (p *Poller) setStatus(ctx context.Context, repo string, pull *github.Pull, verdict, url string, log *slog.Logger) {
+	if !p.cfg.Status.Applies(pull.User.Login) {
+		return
+	}
+	st := github.CommitStatus{State: "success", Context: p.cfg.Status.Context, Description: review.StatusText[verdict], TargetURL: url}
+	if verdict == "blocked" {
+		st.State = "failure"
+	}
+	if verdict == "" {
+		log.Warn("no verdict in the review body, not setting the commit status", "context", st.Context)
+		return
+	}
+	if err := p.gh.CreateStatus(ctx, repo, pull.Head.SHA, st); err != nil {
+		log.Warn("could not set the commit status", "context", st.Context, "state", st.State, "err", err)
+		return
+	}
+	log.Info("commit status set", "context", st.Context, "state", st.State)
 }
 
 func (p *Poller) linkFindings(ctx context.Context, repo string, number int, reviewID int64, out review.Output) error {

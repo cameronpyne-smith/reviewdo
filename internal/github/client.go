@@ -411,6 +411,18 @@ type ReviewRequest struct {
 	Comments []ReviewComment `json:"comments,omitempty"`
 }
 
+type CommitStatus struct {
+	State       string `json:"state"`
+	Context     string `json:"context"`
+	Description string `json:"description,omitempty"`
+	TargetURL   string `json:"target_url,omitempty"`
+}
+
+func (c *Client) CreateStatus(ctx context.Context, repo, sha string, st CommitStatus) error {
+	path := fmt.Sprintf("/repos/%s/statuses/%s", repo, sha)
+	return c.do(ctx, http.MethodPost, path, acceptJSON, st, nil)
+}
+
 type Review struct {
 	ID      int64  `json:"id"`
 	HTMLURL string `json:"html_url"`

@@ -121,7 +121,7 @@ them.
 - Git runs with system and global config disabled and no credential helper.
   The installation token is passed per command through the environment and is
   never written to the clone.
-- The app has `Pull requests: read & write` and `Contents: read` only.
+- The app has `Pull requests: read & write` and `Contents: read` only, plus `Commit statuses: read & write` when `status` is set.
 - The private key is passed to the service by systemd `LoadCredential`, readable
   by root only on disk. It is never in this repo or in dotfiles.
 - The service runs as a `DynamicUser` with a locked-down systemd sandbox
@@ -230,6 +230,7 @@ See `deploy/config.example.json`. Fields:
 | `repos[].instructions`, `repos[].instructions_file` | | guidance for that repo only |
 | `exclude_repos` | | `owner/repo` names never polled, useful with `owner/*`; `review owner/repo#N` still works on them |
 | `lock` | unset | a directory, such as `/run/lock/ollama` which `deploy/install.sh` creates through tmpfiles.d, that the poller holds a kernel `flock` on for the length of each review. Another process that holds the same lock while it uses the Ollama, such as the proseco fixer with its `fixer.turnLock`, then takes turns with reviewdo per job instead of interleaving model calls, which would evict each other's prompt cache. The directory is opened read-only, so the sandbox needs no write access. Unset or missing: reviews run without taking turns, logged once |
+| `status` | unset | `{ "context": "review", "authors": ["acme-fixer[bot]"] }`: after reviewing a pull request opened by one of the listed authors (compared case-insensitively), set a commit status with that context on the reviewed head: `success` for a ready or caution verdict, `failure` for blocked, with the review as its link. Meant for a branch rule that requires a review status which a bot's pull requests would otherwise never get; listing the authors keeps the status off pull requests by people, whose own review process sets it. Needs the `Commit statuses: read & write` permission on the app; a refused status is logged and does not fail the review |
 | `ollama.model` | | required |
 | `ollama.num_ctx` | `32768` | context window requested from Ollama |
 | `ollama.num_predict` | `12288` | output tokens per model round, thinking included; stops runaway deliberation |

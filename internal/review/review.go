@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -377,6 +378,22 @@ var verdictRank = map[string]int{"ready": 0, "caution": 1, "blocked": 2}
 
 func Marker(verdict string) string {
 	return "<!-- reviewdo verdict=" + verdict + " -->"
+}
+
+var markerRe = regexp.MustCompile(`<!--\s*reviewdo verdict=(ready|caution|blocked)\s*-->`)
+
+func ParseVerdict(body string) string {
+	m := markerRe.FindStringSubmatch(body)
+	if m == nil {
+		return ""
+	}
+	return m[1]
+}
+
+var StatusText = map[string]string{
+	"ready":   "Ready to merge",
+	"caution": "Merge with care",
+	"blocked": "Changes requested",
 }
 
 var verdictLabel = map[string]string{

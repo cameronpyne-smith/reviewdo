@@ -24,3 +24,17 @@ func TestVerdictFollowsFindings(t *testing.T) {
 		}
 	}
 }
+
+func TestParseVerdictReadsTheMarker(t *testing.T) {
+	cases := map[string]string{
+		Marker("caution") + "\n## 🟡 Merge with care": "caution",
+		"<!--  reviewdo verdict=blocked  -->":        "blocked",
+		"## 🟢 Ready to merge ✅\n\nNo marker here":    "",
+		"<!-- reviewdo verdict=approved -->":         "",
+	}
+	for body, want := range cases {
+		if got := ParseVerdict(body); got != want {
+			t.Errorf("%q: got %q, want %q", body, got, want)
+		}
+	}
+}

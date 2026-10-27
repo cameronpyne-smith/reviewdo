@@ -35,6 +35,7 @@ type Config struct {
 	PollInterval     Duration `json:"poll_interval"`
 	Label            string   `json:"label"`
 	Lock             string   `json:"lock"`
+	Status           *Status  `json:"status"`
 	AutoReview       *bool    `json:"auto_review"`
 	Instructions     string   `json:"instructions"`
 	InstructionsFile string   `json:"instructions_file"`
@@ -42,6 +43,23 @@ type Config struct {
 	ExcludeRepos     []string `json:"exclude_repos"`
 	Ollama           Ollama   `json:"ollama"`
 	Review           Review   `json:"review"`
+}
+
+type Status struct {
+	Context string   `json:"context"`
+	Authors []string `json:"authors"`
+}
+
+func (s *Status) Applies(login string) bool {
+	if s == nil {
+		return false
+	}
+	for _, a := range s.Authors {
+		if strings.EqualFold(a, login) {
+			return true
+		}
+	}
+	return false
 }
 
 type Repo struct {
@@ -265,6 +283,14 @@ func (c *Config) applyDefaults() error {
 	}
 	if c.Review.Ignore == nil {
 		c.Review.Ignore = DefaultIgnore
+	}
+	if c.Status != nil {
+		if strings.TrimSpace(c.Status.Context) == "" {
+			return errors.New("status.context is required when status is set")
+		}
+		if len(c.Status.Authors) == 0 {
+			return errors.New("status.authors must list at least one pull request author, such as a bot login ending in [bot]")
+		}
 	}
 	return nil
 }

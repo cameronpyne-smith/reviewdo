@@ -43,3 +43,17 @@ func TestDrawsAcceptCountOrList(t *testing.T) {
 		t.Fatalf("model: %+v %v", d, err)
 	}
 }
+
+func TestStatusAppliesToListedAuthorsOnly(t *testing.T) {
+	var unset *Status
+	if unset.Applies("proseco-bot[bot]") {
+		t.Fatal("an unset status applies to nobody")
+	}
+	s := &Status{Context: "review", Authors: []string{"Proseco-Bot[bot]"}}
+	if !s.Applies("proseco-bot[bot]") {
+		t.Error("listed author, case-insensitively, should apply")
+	}
+	if s.Applies("ana") {
+		t.Error("an unlisted author should not apply")
+	}
+}
