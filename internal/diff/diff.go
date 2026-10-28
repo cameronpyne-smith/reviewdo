@@ -1,6 +1,8 @@
 package diff
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"path"
 	"strconv"
@@ -192,4 +194,28 @@ func (f *File) Render() string {
 		}
 	}
 	return b.String()
+}
+
+func Fingerprint(data []byte) (string, bool) {
+	h := sha256.New()
+	empty := true
+	for _, raw := range strings.Split(string(data), "\n") {
+		switch {
+		case strings.HasPrefix(raw, "index "):
+			continue
+		case strings.HasPrefix(raw, "Binary files "), strings.HasPrefix(raw, "GIT binary patch"):
+			return "", false
+		case strings.HasPrefix(raw, "@@ "):
+			raw = "@@"
+		}
+		if raw != "" {
+			empty = false
+		}
+		h.Write([]byte(raw))
+		h.Write([]byte{'\n'})
+	}
+	if empty {
+		return "", false
+	}
+	return hex.EncodeToString(h.Sum(nil)), true
 }

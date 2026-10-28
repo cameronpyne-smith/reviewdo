@@ -232,6 +232,9 @@ func (p *Poller) scanRepo(ctx context.Context, repo config.Repo) ([]job, error) 
 		case auto && ps.ReviewedSHA == "" && !ps.Baselined && !pull.Draft && ps.FailedSHA != pull.Head.SHA && pull.User.Type != "Bot":
 			tr = trigger{reason: "opened", at: pull.CreatedAt}
 		default:
+			if p.cfg.Status.Applies(pull.User.Login) {
+				carryStatus(ctx, p.gh, repo.Name, &pull, ps, log)
+			}
 			continue
 		}
 		jobs = append(jobs, job{repo: repo, pull: pull, tr: tr, ps: ps})
@@ -258,7 +261,7 @@ func (p *Poller) runJob(ctx context.Context, j job) {
 	release := p.lock.acquire()
 	plog.Info("reviewing")
 	start := time.Now()
-	err := p.Review(ctx, j.repo, &pull, ps.ReviewedSHA)
+	status, err := p.review(ctx, j.repo, &pull, ps.ReviewedSHA)
 	release()
 	if ctx.Err() != nil {
 		plog.Info("review interrupted by shutdown; it will run again on the next start", "took", time.Since(start).Round(time.Second))
@@ -277,6 +280,7 @@ func (p *Poller) runJob(ctx context.Context, j job) {
 	}
 	ps.ReviewedSHA = pull.Head.SHA
 	ps.ReviewedAt = time.Now()
+	ps.Status = status
 	plog.Info("review posted", "took", time.Since(start).Round(time.Second))
 }
 
@@ -329,6 +333,11 @@ type Outcome struct {
 }
 
 func (p *Poller) Review(ctx context.Context, repoCfg config.Repo, pull *github.Pull, previousSHA string) error {
+	_, err := p.review(ctx, repoCfg, pull, previousSHA)
+	return err
+}
+
+func (p *Poller) review(ctx context.Context, repoCfg config.Repo, pull *github.Pull, previousSHA string) (*state.Status, error) {
 	ctx, cancel := context.WithTimeout(ctx, p.cfg.Review.Timeout.Duration)
 	defer cancel()
 	log := p.log.With("pr", pull.Number)
@@ -338,12 +347,12 @@ func (p *Poller) Review(ctx context.Context, repoCfg config.Repo, pull *github.P
 	}
 	oc, err := p.ReviewAt(ctx, repoCfg, pull, pull.Head.SHA, base, previousSHA, log)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if oc.Empty {
 		log.Info("nothing reviewable in diff")
 		if p.DryRun {
-			return nil
+			return nil, nil
 		}
 		rv, err := p.gh.CreateReview(ctx, repoCfg.Name, pull.Number, github.ReviewRequest{
 			CommitID: pull.Head.SHA,
@@ -351,10 +360,9 @@ func (p *Poller) Review(ctx context.Context, repoCfg config.Repo, pull *github.P
 			Body:     fmt.Sprintf("%s\n## 🟢 Ready to merge ✅\n\nNo reviewable changes %s. All changed files are ignored or binary.", review.Marker("ready"), oc.Scope),
 		})
 		if err != nil {
-			return err
+			return nil, err
 		}
-		p.setStatus(ctx, repoCfg.Name, pull, "ready", rv.HTMLURL, log)
-		return nil
+		return p.setStatus(ctx, repoCfg.Name, pull, "ready", rv.HTMLURL, log), nil
 	}
 	out := oc.Output
 	if p.DryRun {
@@ -362,7 +370,7 @@ func (p *Poller) Review(ctx context.Context, repoCfg config.Repo, pull *github.P
 		for _, c := range out.Comments {
 			fmt.Printf("--- %s:%d\n%s\n\n", c.Path, c.Line, c.Body)
 		}
-		return nil
+		return nil, nil
 	}
 
 	req := github.ReviewRequest{CommitID: pull.Head.SHA, Body: out.Body, Event: "COMMENT", Comments: out.Comments}
@@ -374,7 +382,7 @@ func (p *Poller) Review(ctx context.Context, repoCfg config.Repo, pull *github.P
 		rv, err = p.gh.CreateReview(ctx, repoCfg.Name, pull.Number, req)
 	}
 	if err != nil {
-		return fmt.Errorf("post review: %w", err)
+		return nil, fmt.Errorf("post review: %w", err)
 	}
 	log.Info("review url", "url", rv.HTMLURL, "inline", len(req.Comments))
 	if len(req.Comments) > 0 {
@@ -382,13 +390,12 @@ func (p *Poller) Review(ctx context.Context, repoCfg config.Repo, pull *github.P
 			log.Warn("could not link findings to inline comments", "err", err)
 		}
 	}
-	p.setStatus(ctx, repoCfg.Name, pull, review.ParseVerdict(out.Body), rv.HTMLURL, log)
-	return nil
+	return p.setStatus(ctx, repoCfg.Name, pull, review.ParseVerdict(out.Body), rv.HTMLURL, log), nil
 }
 
-func (p *Poller) setStatus(ctx context.Context, repo string, pull *github.Pull, verdict, url string, log *slog.Logger) {
+func (p *Poller) setStatus(ctx context.Context, repo string, pull *github.Pull, verdict, url string, log *slog.Logger) *state.Status {
 	if !p.cfg.Status.Applies(pull.User.Login) {
-		return
+		return nil
 	}
 	st := github.CommitStatus{State: "success", Context: p.cfg.Status.Context, Description: review.StatusText[verdict], TargetURL: url}
 	if verdict == "blocked" {
@@ -396,13 +403,14 @@ func (p *Poller) setStatus(ctx context.Context, repo string, pull *github.Pull, 
 	}
 	if verdict == "" {
 		log.Warn("no verdict in the review body, not setting the commit status", "context", st.Context)
-		return
+		return nil
 	}
 	if err := p.gh.CreateStatus(ctx, repo, pull.Head.SHA, st); err != nil {
 		log.Warn("could not set the commit status", "context", st.Context, "state", st.State, "err", err)
-		return
+		return nil
 	}
 	log.Info("commit status set", "context", st.Context, "state", st.State)
+	return &state.Status{SHA: pull.Head.SHA, Context: st.Context, State: st.State, Description: st.Description, TargetURL: st.TargetURL}
 }
 
 func (p *Poller) linkFindings(ctx context.Context, repo string, number int, reviewID int64, out review.Output) error {

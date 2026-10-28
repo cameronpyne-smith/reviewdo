@@ -77,3 +77,32 @@ func TestIgnored(t *testing.T) {
 		}
 	}
 }
+
+func TestFingerprintIgnoresLineNumbersAndBlobIDs(t *testing.T) {
+	a := "diff --git a/go.sum b/go.sum\nindex 1111111..2222222 100644\n--- a/go.sum\n+++ b/go.sum\n@@ -10,3 +10,3 @@ section\n a\n-b 1.0\n+b 1.1\n c\n"
+	moved := "diff --git a/go.sum b/go.sum\nindex 3333333..4444444 100644\n--- a/go.sum\n+++ b/go.sum\n@@ -40,3 +40,3 @@ other\n a\n-b 1.0\n+b 1.1\n c\n"
+	ka, ok := Fingerprint([]byte(a))
+	if !ok {
+		t.Fatal("a text diff should have a fingerprint")
+	}
+	if km, _ := Fingerprint([]byte(moved)); km != ka {
+		t.Fatal("the same change at other line numbers should match")
+	}
+	for name, other := range map[string]string{
+		"changed line":    "diff --git a/go.sum b/go.sum\n--- a/go.sum\n+++ b/go.sum\n@@ -10,3 +10,3 @@\n a\n-b 1.0\n+b 1.2\n c\n",
+		"changed context": "diff --git a/go.sum b/go.sum\n--- a/go.sum\n+++ b/go.sum\n@@ -10,3 +10,3 @@\n z\n-b 1.0\n+b 1.1\n c\n",
+		"extra file":      a + "diff --git a/x b/x\n--- a/x\n+++ b/x\n@@ -1 +1 @@\n-1\n+2\n",
+		"mode change":     "diff --git a/go.sum b/go.sum\nold mode 100644\nnew mode 100755\n--- a/go.sum\n+++ b/go.sum\n@@ -10,3 +10,3 @@\n a\n-b 1.0\n+b 1.1\n c\n",
+		"end of file":     a + "\\ No newline at end of file\n",
+	} {
+		if k, _ := Fingerprint([]byte(other)); k == ka {
+			t.Errorf("%s: should not match", name)
+		}
+	}
+	if _, ok := Fingerprint([]byte("diff --git a/i.png b/i.png\nBinary files a/i.png and b/i.png differ\n")); ok {
+		t.Error("a binary diff cannot be fingerprinted")
+	}
+	if _, ok := Fingerprint(nil); ok {
+		t.Error("an empty diff cannot be fingerprinted")
+	}
+}

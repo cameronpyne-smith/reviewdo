@@ -26,6 +26,16 @@ type Pull struct {
 	FailedSHA      string    `json:"failed_sha,omitempty"`
 	PendingComment int64     `json:"pending_comment,omitempty"`
 	Baselined      bool      `json:"baselined,omitempty"`
+	Status         *Status   `json:"status,omitempty"`
+	CarryChecked   string    `json:"carry_checked,omitempty"`
+}
+
+type Status struct {
+	SHA         string `json:"sha"`
+	Context     string `json:"context"`
+	State       string `json:"state"`
+	Description string `json:"description,omitempty"`
+	TargetURL   string `json:"target_url,omitempty"`
 }
 
 func Load(path string) (*State, bool, error) {
